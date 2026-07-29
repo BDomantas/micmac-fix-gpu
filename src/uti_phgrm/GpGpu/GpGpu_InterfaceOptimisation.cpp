@@ -1,3 +1,5 @@
+#include <stdio.h> // RUNPOD_GPGPU_DIAG
+#include <cuda_runtime.h> // RUNPOD_GPGPU_DIAG
 #include "GpGpu/GpGpu_InterOptimisation.h"
 
 InterfOptimizGpGpu::InterfOptimizGpGpu()
@@ -47,6 +49,11 @@ void InterfOptimizGpGpu::Prepare(uint x, uint y, ushort penteMax, ushort NBDir,f
 
 void InterfOptimizGpGpu::optimisation()
 {
+    // RUNPOD_GPGPU_DIAG
+    fprintf(stderr, "[GPGPU][%s] optimisation ENTER idBuf=%d nbLines=%u\n",
+            "RUNPOD_GPGPU_DIAG", (int)GetIdBuf(), (unsigned)_H_data2Opt.nbLines());
+    fflush(stderr);
+
     _D_data2Opt.SetNbLine(_H_data2Opt.nbLines());
 
     _D_data2Opt.setPenteMax(_H_data2Opt.penteMax());
@@ -55,16 +62,32 @@ void InterfOptimizGpGpu::optimisation()
 
     _D_data2Opt.ReallocIf(_H_data2Opt);
 
-    //      Transfert des données vers le device                            ---------------		-
+    fprintf(stderr, "[GPGPU][%s] optimisation CopyHostToDevice BEGIN\n", "RUNPOD_GPGPU_DIAG");
+    fflush(stderr);
     _D_data2Opt.CopyHostToDevice(_H_data2Opt,GetIdBuf());
+    fprintf(stderr, "[GPGPU][%s] optimisation CopyHostToDevice END\n", "RUNPOD_GPGPU_DIAG");
+    fflush(stderr);
 
     SetPreComp(true);
 
-    //      Kernel optimisation                                             ---------------     -
+    fprintf(stderr, "[GPGPU][%s] optimisation Gpu_OptimisationOneDirection BEGIN\n", "RUNPOD_GPGPU_DIAG");
+    fflush(stderr);
     Gpu_OptimisationOneDirection(_D_data2Opt);
+    {
+        cudaError_t err = cudaDeviceSynchronize();
+        if (err != cudaSuccess)
+            fprintf(stderr, "[GPGPU][%s] ERROR after Gpu_OptimisationOneDirection: %s\n",
+                    "RUNPOD_GPGPU_DIAG", cudaGetErrorString(err));
+        else
+            fprintf(stderr, "[GPGPU][%s] optimisation Gpu_OptimisationOneDirection END (sync ok)\n", "RUNPOD_GPGPU_DIAG");
+        fflush(stderr);
+    }
 
-    //      Copie des couts de passage forcé du device vers le host         ---------------     -
+    fprintf(stderr, "[GPGPU][%s] optimisation CopyDevicetoHost BEGIN\n", "RUNPOD_GPGPU_DIAG");
+    fflush(stderr);
     _D_data2Opt.CopyDevicetoHost(_H_data2Opt,GetIdBuf());
+    fprintf(stderr, "[GPGPU][%s] optimisation EXIT\n", "RUNPOD_GPGPU_DIAG");
+    fflush(stderr);
 }
 
 void InterfOptimizGpGpu::simpleWork()

@@ -1,3 +1,5 @@
+#include <stdio.h> // RUNPOD_GPGPU_DIAG
+#include <time.h> // RUNPOD_GPGPU_DIAG
 /*Header-MicMac-eLiSe-25/06/2007
 
     MicMac : Multi Image Correspondances par Methodes Automatiques de Correlation
@@ -285,7 +287,7 @@ void cGBV2_ProgDynOptimiseur::BalayageOneSens
                                 (
                                     aCel0,                                               // cellule colonne courante
                                     aSens,                                               // Sens de parcours
-                                    mTabCost[0].Cost(aDx) + mTabCost[1].Cost(aDy)        // Tabulation des p�nalit�s ou cout de transition
+                                    mTabCost[0].Cost(aDx) + mTabCost[1].Cost(aDy)        // Tabulation des p�nalit�s ou cout de transition
                                 );                                                                                 // mCostActu[0]*ElAbs(aDx)+mCostActu[1]*ElAbs(aDy)
                     }
                 }
@@ -362,7 +364,7 @@ void cGBV2_ProgDynOptimiseur::BalayageOneLine(const std::vector<Pt2di> & aVPt)
     // aVPt         : ensemble des points
     // eArriere     : Sens de parcours
     // aVPt.size()-1: on part du dernier point
-    // -1           : delta incrementation invers�
+    // -1           : delta incrementation invers�
     // -1           : limite du parcours
     BalayageOneSens(aVPt,cGBV2_CelOptimProgDyn::eArriere,(int) (aVPt.size())-1,-1,-1);
 
@@ -698,8 +700,14 @@ void cGBV2_ProgDynOptimiseur::SolveAllDirectionGpu(int aNbDir)
 
 	IGpuOpt.SetCompute(true);
 
-    while (aKDir < aNbDir)
+    // RUNPOD_GPGPU_DIAG
+fprintf(stderr, "[GPGPU][%s] SolveAllDirectionGpu ENTER aNbDir=%d Sz=(%d,%d)\n", "RUNPOD_GPGPU_DIAG", aNbDir, mSz.x, mSz.y);
+fflush(stderr);
+unsigned long _opt_idle = 0;
+while (aKDir < aNbDir)
     {
+        bool _opt_did = false; // RUNPOD_GPGPU_DIAG
+
 
         if( aKPreDir <= aKDir + 1 && aKPreDir < aNbDir &&  IGpuOpt.GetPreComp() )
         {
@@ -749,7 +757,10 @@ void cGBV2_ProgDynOptimiseur::SolveAllDirectionGpu(int aNbDir)
 
             //IGpuOpt.SetCompute(true);
             IGpuOpt.SetPreComp(false);
+            fprintf(stderr, "[GPGPU][%s] Optim PREP dirPre=%d/%d\n", "RUNPOD_GPGPU_DIAG", aKPreDir, aNbDir);
+            fflush(stderr);
             IGpuOpt.simpleJob();
+            _opt_did = true;
 
             aKPreDir++;
             idPreCo = !idPreCo;
@@ -762,11 +773,33 @@ void cGBV2_ProgDynOptimiseur::SolveAllDirectionGpu(int aNbDir)
 //				copyCells_Stream2Mat<true>(direction(aNbDir,aKDir),IGpuOpt.HData2Opt(),IGpuOpt._poInitCost,IGpuOpt._preFinalCost1D,IGpuOpt._FinalDefCor,!IGpuOpt.GetIdBuf());
 //			else
 				copyCells_Stream2Mat<false>(direction(aNbDir,aKDir),IGpuOpt.HData2Opt(),IGpuOpt._poInitCost,IGpuOpt._preFinalCost1D,IGpuOpt._FinalDefCor,!IGpuOpt.GetIdBuf());
-			IGpuOpt.SetDataToCopy(false);
+			fprintf(stderr, "[GPGPU][%s] Optim COPY dir=%d/%d\n", "RUNPOD_GPGPU_DIAG", aKDir, aNbDir);
+fflush(stderr);
+IGpuOpt.SetDataToCopy(false);
 			aKDir++;
+_opt_did = true;
         }
+        if (!_opt_did)
+        {
+            _opt_idle++;
+#if (!ELISE_windows)
+            { struct timespec _ts; _ts.tv_sec=0; _ts.tv_nsec=2000000L; nanosleep(&_ts, 0); }
+#endif
+            if ((_opt_idle % 1000) == 0)
+            {
+                fprintf(stderr,
+                    "[GPGPU][%s] Optim HOST_IDLE dir=%d/%d pre=%d compute=%d copy=%d preFlag=%d idle=%lu\n",
+                    "RUNPOD_GPGPU_DIAG", aKDir, aNbDir, aKPreDir,
+                    (int)IGpuOpt.GetCompute(), (int)IGpuOpt.GetDataToCopy(), (int)IGpuOpt.GetPreComp(),
+                    _opt_idle);
+                fflush(stderr);
+            }
+        }
+
     }
 
+    fprintf(stderr, "[GPGPU][%s] SolveAllDirectionGpu EXIT dirs_done=%d\n", "RUNPOD_GPGPU_DIAG", aKDir);
+    fflush(stderr);
     IGpuOpt.freezeCompute();
 
 }
@@ -966,7 +999,7 @@ cSurfaceOptimiseur * cSurfaceOptimiseur::AllocAlgoTestGPU
 
 /*Footer-MicMac-eLiSe-25/06/2007
 
-Ce logiciel est un programme informatique servant �  la mise en
+Ce logiciel est un programme informatique servant �  la mise en
 correspondances d'images pour la reconstruction du relief.
 
 Ce logiciel est régi par la licence CeCILL-B soumise au droit français et
@@ -978,21 +1011,21 @@ sur le site "http://www.cecill.info".
 En contrepartie de l'accessibilité au code source et des droits de copie,
 de modification et de redistribution accordés par cette licence, il n'est
 offert aux utilisateurs qu'une garantie limitée.  Pour les mêmes raisons,
-seule une responsabilité restreinte p�?se sur l'auteur du programme,  le
+seule une responsabilité restreinte p�?se sur l'auteur du programme,  le
 titulaire des droits patrimoniaux et les concédants successifs.
 
 A cet égard  l'attention de l'utilisateur est attirée sur les risques
-associés au chargement,  �  l'utilisation,  �  la modification et/ou au
-développement et �  la reproduction du logiciel par l'utilisateur étant
-donné sa spécificité de logiciel libre, qui peut le rendre complexe �
-manipuler et qui le réserve donc �  des développeurs et des professionnels
+associés au chargement,  �  l'utilisation,  �  la modification et/ou au
+développement et �  la reproduction du logiciel par l'utilisateur étant
+donné sa spécificité de logiciel libre, qui peut le rendre complexe �
+manipuler et qui le réserve donc �  des développeurs et des professionnels
 avertis possédant  des  connaissances  informatiques approfondies.  Les
-utilisateurs sont donc invités �  charger  et  tester  l'adéquation  du
-logiciel �  leurs besoins dans des conditions permettant d'assurer la
-sécurité de leurs syst�?mes et ou de leurs données et, plus généralement,
-�  l'utiliser et l'exploiter dans les mêmes conditions de sécurité.
+utilisateurs sont donc invités �  charger  et  tester  l'adéquation  du
+logiciel �  leurs besoins dans des conditions permettant d'assurer la
+sécurité de leurs syst�?mes et ou de leurs données et, plus généralement,
+�  l'utiliser et l'exploiter dans les mêmes conditions de sécurité.
 
-Le fait que vous puissiez accéder �  cet en-tête signifie que vous avez
+Le fait que vous puissiez accéder �  cet en-tête signifie que vous avez
 pris connaissance de la licence CeCILL-B, et que vous en avez accepté les
 termes.
 Footer-MicMac-eLiSe-25/06/2007*/

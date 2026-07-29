@@ -2,6 +2,7 @@
 #define __GPGPU_MULTITHREADING_CPU_H__
 
 #include <stdio.h>
+#include <unistd.h> // RUNPOD_GPGPU_DIAG
 
 #include "GpGpu/GpGpu_Data.h"
 
@@ -38,12 +39,12 @@ public:
     ~CSimpleJobCpuGpu();
 
     ///
-    /// \brief SetCompute indique au thread Gpu s'il doit traiter les données
+    /// \brief SetCompute indique au thread Gpu s'il doit traiter les donnï¿½es
     /// \param toBeComputed
     ///
     void            SetCompute(T toBeComputed);
     ///
-    /// \brief GetCompute : savoir si le Gpu doit traiter des données
+    /// \brief GetCompute : savoir si le Gpu doit traiter des donnï¿½es
     /// \return
     ///
     T               GetCompute();
@@ -74,7 +75,7 @@ public:
 
 	///
 	/// \brief UseMultiThreading
-	/// \return La valeur de l'option sur l'utilisation du parallélisme CPU
+	/// \return La valeur de l'option sur l'utilisation du parallï¿½lisme CPU
 	///
     bool            UseMultiThreading();
 
@@ -89,7 +90,7 @@ public:
     void            SwitchIdBuffer();
 	///
 	/// \brief ResetIdBuffer
-	/// Réinitialise l'identifiant du buffer
+	/// Rï¿½initialise l'identifiant du buffer
     void            ResetIdBuffer();
 
 	///
@@ -101,11 +102,11 @@ public:
 	///
 	/// \brief SetProgress
 	/// \param expected_count
-	/// Définir la progression
+	/// Dï¿½finir la progression
     void            SetProgress(unsigned long expected_count);
 
 	///
-	/// \brief IncProgress Incrémenter la progression
+	/// \brief IncProgress Incrï¿½menter la progression
 	/// \param inc
 	///
     void            IncProgress(uint inc = 1);
@@ -299,41 +300,119 @@ void CSimpleJobCpuGpu<T>::IncProgress(uint inc)
 template< class T >
 void CSimpleJobCpuGpu<T>::simpleCompute()
 {
-    while(!GetCompute())
+    // RUNPOD_GPGPU_DIAG: safer waits + heartbeats (GPU hang diagnosis)
+    auto _gpgpu_now = []() -> double {
+#if defined(CPP11_THREAD) && defined(NOCUDA_X11)
+        using clock = std::chrono::steady_clock;
+        return std::chrono::duration<double>(clock::now().time_since_epoch()).count();
+#else
+        return 0.0;
+#endif
+    };
+    auto _gpgpu_sleep_us = [](int us) {
 #ifdef CPP11_THREAD
     #ifdef NOCUDA_X11
-        std::this_thread::sleep_for(std::chrono::microseconds(1));
+        std::this_thread::sleep_for(std::chrono::microseconds(us));
+    #endif
+#else
+        boost::this_thread::sleep(boost::posix_time::microsec(us));
 #endif
-     #else
-        boost::this_thread::sleep(boost::posix_time::microsec(1));
-#endif
+    };
+    fprintf(stderr, "[GPGPU][%s] simpleCompute ENTER pid=%d\n", "RUNPOD_GPGPU_DIAG", (int)getpid());
+    fflush(stderr);
+
+    double t0 = _gpgpu_now();
+    double t_last = t0;
+    unsigned long wait_iters = 0;
+    while(!GetCompute())
+    {
+        wait_iters++;
+        _gpgpu_sleep_us(200);
+        double t = _gpgpu_now();
+        if (t - t_last >= 2.0)
+        {
+            fprintf(stderr,
+                "[GPGPU][%s] simpleCompute WAIT_COMPUTE pid=%d elapsed=%.1fs iters=%lu "
+                "compute=%d copy=%d pre=%d idBuf=%d\n",
+                "RUNPOD_GPGPU_DIAG", (int)getpid(), t - t0, wait_iters,
+                (int)GetCompute(), (int)GetDataToCopy(), (int)GetPreComp(), (int)GetIdBuf());
+            fflush(stderr);
+            t_last = t;
+        }
+        if (t - t0 > 600.0 && wait_iters % 5000 == 0)
+        {
+            fprintf(stderr,
+                "[GPGPU][%s] WARNING simpleCompute still WAIT_COMPUTE after %.0fs pid=%d\n",
+                "RUNPOD_GPGPU_DIAG", t - t0, (int)getpid());
+            fflush(stderr);
+        }
+    }
     SetCompute(false);
 
+    fprintf(stderr, "[GPGPU][%s] simpleCompute WORK_BEGIN pid=%d wait_compute=%.2fs\n",
+            "RUNPOD_GPGPU_DIAG", (int)getpid(), _gpgpu_now() - t0);
+    fflush(stderr);
+    double t_work0 = _gpgpu_now();
     simpleWork();
+    fprintf(stderr, "[GPGPU][%s] simpleCompute WORK_END pid=%d work=%.2fs\n",
+            "RUNPOD_GPGPU_DIAG", (int)getpid(), _gpgpu_now() - t_work0);
+    fflush(stderr);
 
-    while(GetDataToCopy());
-//        boost::this_thread::sleep(boost::posix_time::microsec(5));
+    t0 = _gpgpu_now();
+    t_last = t0;
+    wait_iters = 0;
+    while(GetDataToCopy())
+    {
+        // was busy-spin with sleep commented out â€” host may never clear flag
+        wait_iters++;
+        _gpgpu_sleep_us(200);
+        double t = _gpgpu_now();
+        if (t - t_last >= 2.0)
+        {
+            fprintf(stderr,
+                "[GPGPU][%s] simpleCompute WAIT_COPY_CLEAR pid=%d elapsed=%.1fs iters=%lu "
+                "compute=%d copy=%d pre=%d idBuf=%d\n",
+                "RUNPOD_GPGPU_DIAG", (int)getpid(), t - t0, wait_iters,
+                (int)GetCompute(), (int)GetDataToCopy(), (int)GetPreComp(), (int)GetIdBuf());
+            fflush(stderr);
+            t_last = t;
+        }
+        if (t - t0 > 600.0 && wait_iters % 5000 == 0)
+        {
+            fprintf(stderr,
+                "[GPGPU][%s] WARNING simpleCompute WAIT_COPY_CLEAR >600s (possible host stall) pid=%d\n",
+                "RUNPOD_GPGPU_DIAG", (int)getpid());
+            fflush(stderr);
+        }
+    }
 
     SwitchIdBuffer();
     SetDataToCopy(true);
     SetCompute(true);
-
+    fprintf(stderr, "[GPGPU][%s] simpleCompute EXIT pid=%d total=%.2fs idBuf=%d\n",
+            "RUNPOD_GPGPU_DIAG", (int)getpid(), _gpgpu_now() - t_work0, (int)GetIdBuf());
+    fflush(stderr);
 }
 
 template< class T >
 void CSimpleJobCpuGpu<T>::simpleJob()
 {
+    fprintf(stderr, "[GPGPU][%s] simpleJob SPAWN pid=%d compute=%d copy=%d pre=%d idBuf=%d\n",
+            "RUNPOD_GPGPU_DIAG", (int)getpid(),
+            (int)GetCompute(), (int)GetDataToCopy(), (int)GetPreComp(), (int)GetIdBuf());
+    fflush(stderr);
 #ifdef CPP11_THREAD
     #ifdef NOCUDA_X11
         std::thread tOpti(&CSimpleJobCpuGpu<T>::simpleCompute,this);
         tOpti.detach();
+    #else
+        fprintf(stderr, "[GPGPU][%s] ERROR simpleJob: CPP11_THREAD without NOCUDA_X11 â€” NO WORKER THREAD\n", "RUNPOD_GPGPU_DIAG");
+        fflush(stderr);
     #endif
 #else
         boost::thread tOpti(&CSimpleJobCpuGpu<T>::simpleCompute,this);
         tOpti.detach();
 #endif
-
-
 }
 
 

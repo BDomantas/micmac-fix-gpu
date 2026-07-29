@@ -1,3 +1,5 @@
+#include <stdio.h> // RUNPOD_GPGPU_DIAG
+#include <cuda_runtime.h> // RUNPOD_GPGPU_DIAG
 #include "GpGpu/GpGpu_InterCorrel.h"
 
 /// \brief Constructeur GpGpuInterfaceCorrel
@@ -63,31 +65,62 @@ void GpGpuInterfaceCorrel::SetParameter(int nbLayer , ushort2 dRVig , uint2 dimI
 
 void GpGpuInterfaceCorrel::BasicCorrelation()
 {
+    // RUNPOD_GPGPU_DIAG
+    fprintf(stderr, "[GPGPU][%s] BasicCorrelation ENTER idBuf=%d\n", "RUNPOD_GPGPU_DIAG", (int)GetIdBuf());
+    fflush(stderr);
 
-    // Re-allocation les structures de données si elles ont été modifiées
+    // Re-allocation les structures de donnees si elles ont ete modifiees
 
     Data().ReallocDeviceData(Param(GetIdBuf()));
+    fprintf(stderr, "[GPGPU][%s] BasicCorrelation after ReallocDeviceData\n", "RUNPOD_GPGPU_DIAG");
+    fflush(stderr);
 
     // copie des donnees du host vers le device
 
     Data().copyHostToDevice(Param(GetIdBuf()));
+    fprintf(stderr, "[GPGPU][%s] BasicCorrelation after copyHostToDevice\n", "RUNPOD_GPGPU_DIAG");
+    fflush(stderr);
 
-    // Indique que la copie est terminée pour le thread de calcul des projections
+    // Indique que la copie est terminee pour le thread de calcul des projections
     SetPreComp(true);
 
     // Lancement du calcul de correlation
+    fprintf(stderr, "[GPGPU][%s] BasicCorrelation CorrelationGpGpu BEGIN\n", "RUNPOD_GPGPU_DIAG");
+    fflush(stderr);
     CorrelationGpGpu(GetIdBuf());
+    {
+        cudaError_t err = cudaDeviceSynchronize();
+        if (err != cudaSuccess)
+            fprintf(stderr, "[GPGPU][%s] ERROR after CorrelationGpGpu: %s\n", "RUNPOD_GPGPU_DIAG", cudaGetErrorString(err));
+        else
+            fprintf(stderr, "[GPGPU][%s] BasicCorrelation CorrelationGpGpu END (sync ok)\n", "RUNPOD_GPGPU_DIAG");
+        fflush(stderr);
+    }
 
     // relacher la texture de projection
 
     Data().UnBindTextureProj();
 
     // Lancement du calcul de multi-correlation
+    fprintf(stderr, "[GPGPU][%s] BasicCorrelation MultiCorrelationGpGpu BEGIN\n", "RUNPOD_GPGPU_DIAG");
+    fflush(stderr);
     MultiCorrelationGpGpu(GetIdBuf());
+    {
+        cudaError_t err = cudaDeviceSynchronize();
+        if (err != cudaSuccess)
+            fprintf(stderr, "[GPGPU][%s] ERROR after MultiCorrelationGpGpu: %s\n", "RUNPOD_GPGPU_DIAG", cudaGetErrorString(err));
+        else
+            fprintf(stderr, "[GPGPU][%s] BasicCorrelation MultiCorrelationGpGpu END (sync ok)\n", "RUNPOD_GPGPU_DIAG");
+        fflush(stderr);
+    }
 
     // Copier les resultats de calcul des couts du device vers le host!
 
+    fprintf(stderr, "[GPGPU][%s] BasicCorrelation CopyDevicetoHost BEGIN\n", "RUNPOD_GPGPU_DIAG");
+    fflush(stderr);
     Data().CopyDevicetoHost(GetIdBuf());
+    fprintf(stderr, "[GPGPU][%s] BasicCorrelation EXIT\n", "RUNPOD_GPGPU_DIAG");
+    fflush(stderr);
 
 }
 
