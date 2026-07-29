@@ -265,7 +265,7 @@ void connectCellsLine(
     //////////////////////////////////////////////////
     /// TODO!!!! : quel doit etre prevDefCor p.costTransDefMask + p.costDefMask ou p.costDefMask
     /////////////////////////////////////////////////
-	uint         prevDefCor	=/* p.costTransDefMask + */p.prevDefCor; // TODO Voir la valeur à mettre!!!
+	uint         prevDefCor	=/* p.costTransDefMask + */p.prevDefCor; // TODO Voir la valeur ï¿½ mettre!!!
 	const ushort idGline	= p.line.id + p.seg.id;
 
 	streamDefCor.SetOrAddValue<sens>(__choose<sens>((uint)idGline, p.line.lenght  - idGline),prevDefCor);
@@ -292,7 +292,7 @@ void connectCellsLine(
                 {
                     streamICost.read<sens>(ST_Bf_ICost);    //  Lecture des couts correlations
                     streamFCost.incre<sens>();              //  Pointage sur la sortie
-                    p.ID_Bf_Icost = 0;                      //  Pointage la première valeur du buffer des couts correlations
+                    p.ID_Bf_Icost = 0;                      //  Pointage la premiï¿½re valeur du buffer des couts correlations
                 }
 
                 uint    fCostMin        = max_cost;
@@ -438,7 +438,7 @@ void Kernel_OptimisationOneDirection(ushort* g_ICost, short3* g_Index, uint* g_F
 	connectCellsLine<eARRIERE,hasMask>( streamIndex,streamFCost,streamICost,streamDefCor,S_BuffIndex + WARPSIZE - 1,S_BuffICost,S_BuffFCost,p);
 }
 
-extern "C" void Gpu_OptimisationOneDirection(Data2Optimiz<CuDeviceData3D> &d2O)
+extern "C" void Gpu_OptimisationOneDirection(Data2Optimiz<CuDeviceData3D> &d2O, cudaStream_t stream)
 {
     ushort  deltaMax         = d2O.penteMax();
     float   zReg             = (float)d2O.zReg();
@@ -453,7 +453,7 @@ extern "C" void Gpu_OptimisationOneDirection(Data2Optimiz<CuDeviceData3D> &d2O)
     ushort sizeBuff = min(d2O.DzMax(),4096);  //NAPPEMAX;
     ushort cacheLin = sizeBuff + 2 * WARPSIZE;
 
-    // Calcul de l'allocation dynamique de la memoire partagée
+    // Calcul de l'allocation dynamique de la memoire partagï¿½e
     uint   sizeSharedMemory =
             cacheLin * sizeof(ushort)   + // S_BuffICost0
             cacheLin * sizeof(uint)     + // S_BuffFCost0
@@ -465,7 +465,7 @@ extern "C" void Gpu_OptimisationOneDirection(Data2Optimiz<CuDeviceData3D> &d2O)
 
 
 	if(hasMaskauto)
-		Kernel_OptimisationOneDirection< uint,true ><<<Blocks,Threads,sizeSharedMemory>>>
+		Kernel_OptimisationOneDirection< uint,true ><<<Blocks,Threads,sizeSharedMemory, stream>>>
 																						(
 																							d2O.pInitCost(),
 																							d2O.pIndex(),
@@ -481,7 +481,7 @@ extern "C" void Gpu_OptimisationOneDirection(Data2Optimiz<CuDeviceData3D> &d2O)
 																							hasMaskauto
 																							);
 	else
-		Kernel_OptimisationOneDirection< uint,false ><<<Blocks,Threads,sizeSharedMemory>>>
+		Kernel_OptimisationOneDirection< uint,false ><<<Blocks,Threads,sizeSharedMemory, stream>>>
 																						 (
 																							 d2O.pInitCost(),
 																							 d2O.pIndex(),

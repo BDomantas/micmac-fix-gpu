@@ -3,15 +3,20 @@
 #include "GpGpu/GpGpu_InterOptimisation.h"
 #include "GpGpu/GpGpu_Diag.h"
 #include "GpGpu/GpGpu_AutoNbProc.h"
+#include "GpGpu/GpGpu_Pipeline.h"
 
 InterfOptimizGpGpu::InterfOptimizGpGpu()
 {
     //CreateJob();
-
+    checkCudaErrors(cudaStreamCreate(&_optStream));
     freezeCompute();
 }
 
-InterfOptimizGpGpu::~InterfOptimizGpGpu(){}
+InterfOptimizGpGpu::~InterfOptimizGpGpu()
+{
+    if (_optStream)
+        cudaStreamDestroy(_optStream);
+}
 
 void InterfOptimizGpGpu::Dealloc()
 {
@@ -63,13 +68,25 @@ void InterfOptimizGpGpu::optimisation()
     _D_data2Opt.ReallocIf(_H_data2Opt);
 
     GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] optimisation CopyHostToDevice BEGIN\n");
+    // Phase D: keep sync H2D API (Data2Optimiz lacks stream async wrappers);
+    // kernel runs on optim stream; host waits via stream sync when pipeline on.
     _D_data2Opt.CopyHostToDevice(_H_data2Opt,GetIdBuf());
     GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] optimisation CopyHostToDevice END\n");
 
     SetPreComp(true);
 
     GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] optimisation Gpu_OptimisationOneDirection BEGIN\n");
-    Gpu_OptimisationOneDirection(_D_data2Opt);
+    Gpu_OptimisationOneDirection(_D_data2Opt, _optStream);
+    if (gpgpu_pipeline::PipelineEnabled() && !GpgpuDiagFull())
+    {
+        cudaError_t err = cudaStreamSynchronize(_optStream);
+        if (err != cudaSuccess)
+            GPGPU_DIAG_ERR("[GPGPU][RUNPOD_GPGPU_DIAG] ERROR after optim stream sync: %s\n",
+                    cudaGetErrorString(err));
+        else
+            GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] optimisation END (stream sync ok)\n");
+    }
+    else
     {
         cudaError_t err = cudaDeviceSynchronize();
         if (err != cudaSuccess)
@@ -99,5 +116,3 @@ void InterfOptimizGpGpu::freezeCompute()
     SetCompute(false);
     SetPreComp(false);
 }
-
-

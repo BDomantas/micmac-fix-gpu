@@ -2,24 +2,26 @@
 #define __OPTIMISATION_H__
 
 #include "GpGpu/SData2Optimize.h"
+#include <cuda_runtime.h>
 #include "GpGpu/GpGpu_MultiThreadingCpu.h"
 #include "GpGpu/GpGpu_eLiSe.h"
 
-extern "C" void Gpu_OptimisationOneDirection(DEVC_Data2Opti  &d2O);
+// Phase D: optional cudaStream_t (default 0 = legacy null stream).
+extern "C" void Gpu_OptimisationOneDirection(DEVC_Data2Opti  &d2O, cudaStream_t stream = 0);
 
 template <class T>
 ///
 /// \brief The CuHostDaPo3D struct
-/// Structure 1D des couts de corélation
+/// Structure 1D des couts de corï¿½lation
 struct sMatrixCellCost
 {
 	///
 	/// \brief _CostInit1D
-	/// les couts intrinséques des cellules
+	/// les couts intrinsï¿½ques des cellules
 	CuHostData3D<T>         _CostInit1D;
 	///
 	/// \brief _ptZ
-	/// Coordonnées Z de la nappe d'une position terrain
+	/// Coordonnï¿½es Z de la nappe d'une position terrain
 	CuHostData3D<short3>    _ptZ;
 	///
 	/// \brief _dZ
@@ -27,7 +29,7 @@ struct sMatrixCellCost
     CuHostData3D<ushort>    _dZ;
 	///
 	/// \brief _pit
-	/// Decallage pour acceder au début d'une  ligne
+	/// Decallage pour acceder au dï¿½but d'une  ligne
     CuHostData3D<uint>      _pit;
 
 	///
@@ -48,7 +50,7 @@ struct sMatrixCellCost
 	}
 
 	///
-	/// \brief ReallocPt Reallocation de la mémoire conditionelle
+	/// \brief ReallocPt Reallocation de la mï¿½moire conditionelle
 	/// \param dim
 	///
     void                    ReallocPt(uint2 dim)
@@ -60,7 +62,7 @@ struct sMatrixCellCost
     }
 
 	///
-	/// \brief ReallocData Reallocation de la mémoire conditionelle
+	/// \brief ReallocData Reallocation de la mï¿½moire conditionelle
 	///
     void                    ReallocData()
     {
@@ -71,14 +73,14 @@ struct sMatrixCellCost
 	///
 	/// \brief fillCostInit
 	/// \param val
-	/// Remplir la strucutre par la donnée val
+	/// Remplir la strucutre par la donnï¿½e val
     void                    fillCostInit(ushort val)
     {
         _CostInit1D.Fill(val);
     }
 
 	///
-	/// \brief Dealloc Désalocation de la mémoire
+	/// \brief Dealloc Dï¿½salocation de la mï¿½moire
 	///
     void                    Dealloc()
     {
@@ -125,7 +127,7 @@ struct sMatrixCellCost
     }
 
 	///
-	/// \brief setDefCor Définir la valeur par défaut de corrélation
+	/// \brief setDefCor Dï¿½finir la valeur par dï¿½faut de corrï¿½lation
 	/// \param pt
 	/// \param defCor
 	///
@@ -137,7 +139,7 @@ struct sMatrixCellCost
 	///
 	/// \brief Pit
 	/// \param pt
-	/// \return le décalage pour un point pt
+	/// \return le dï¿½calage pour un point pt
 	///
     uint                    Pit(uint2 pt)
     {
@@ -147,7 +149,7 @@ struct sMatrixCellCost
 	///
 	/// \brief Pit
 	/// \param pt
-	/// \return  le décalage pour un point pt
+	/// \return  le dï¿½calage pour un point pt
 	///
     uint                    Pit(Pt2di pt)
     {
@@ -157,7 +159,7 @@ struct sMatrixCellCost
 	///
 	/// \brief PtZ
 	/// \param pt
-	/// \return Les coordonnées Zmin et Zmax
+	/// \return Les coordonnï¿½es Zmin et Zmax
 	///
     short3                  PtZ(uint2 pt)
     {
@@ -167,7 +169,7 @@ struct sMatrixCellCost
 	///
 	/// \brief PtZ
 	/// \param pt
-	/// \return  Les coordonnées Zmin et Zmax
+	/// \return  Les coordonnï¿½es Zmin et Zmax
 	///
     short3                  PtZ(Pt2di pt)
     {
@@ -217,7 +219,7 @@ struct sMatrixCellCost
 	///
 	/// \brief operator []
 	/// \param pt
-	/// \return le cout intrinsèque du point
+	/// \return le cout intrinsï¿½que du point
 	///
     T*                      operator[](uint2 pt)
     {
@@ -227,7 +229,7 @@ struct sMatrixCellCost
 	///
 	/// \brief operator []
 	/// \param pt
-	/// \return  le cout intrinsèque du point
+	/// \return  le cout intrinsï¿½que du point
 	///
     T*                      operator[](Pt2di pt)
     {
@@ -237,7 +239,7 @@ struct sMatrixCellCost
 	///
 	/// \brief operator []
 	/// \param pt
-	/// \return   le cout intrinsèque du point
+	/// \return   le cout intrinsï¿½que du point
 	///
     T&                      operator[](int3 pt)
     {
@@ -262,12 +264,12 @@ public:
 
     ///
 	/// \brief Data2Opt
-	/// \return les données device
+	/// \return les donnï¿½es device
     ///
     HOST_Data2Opti& HData2Opt(){ return _H_data2Opt;}
 	///
 	/// \brief DData2Opt
-	/// \return Les données hote
+	/// \return Les donnï¿½es hote
 	///
     DEVC_Data2Opti& DData2Opt(){ return _D_data2Opt;}
 
@@ -277,7 +279,7 @@ public:
     void            Dealloc();
 
 	///
-	/// \brief Prepare Initialisation des paramètres
+	/// \brief Prepare Initialisation des paramï¿½tres
 	/// \param x
 	/// \param y
 	/// \param penteMax
@@ -297,12 +299,12 @@ public:
 
 	///
 	/// \brief _preFinalCost1D
-	/// Structure de données des couts forcées
+	/// Structure de donnï¿½es des couts forcï¿½es
     CuHostData3D<uint>      _preFinalCost1D;
 
 	///
 	/// \brief _FinalDefCor
-	/// Structure de données des cellules de defCor
+	/// Structure de donnï¿½es des cellules de defCor
     CuHostData3D<uint>      _FinalDefCor;
 
 	///
@@ -321,6 +323,8 @@ private:
 
     HOST_Data2Opti  _H_data2Opt;
     DEVC_Data2Opti  _D_data2Opt;
+    /// Phase D: dedicated optim CUDA stream (drain before host consumers).
+    cudaStream_t    _optStream;
 
 };
 

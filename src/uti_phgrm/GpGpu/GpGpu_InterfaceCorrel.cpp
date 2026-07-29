@@ -3,6 +3,8 @@
 #include "GpGpu/GpGpu_InterCorrel.h"
 #include "GpGpu/GpGpu_Diag.h"
 #include "GpGpu/GpGpu_AutoNbProc.h"
+#include "GpGpu/GpGpu_Pipeline.h"
+#include "GpGpu/GpGpu_Budget.h"
 
 /// \brief Constructeur GpGpuInterfaceCorrel
 GpGpuInterfaceCorrel::GpGpuInterfaceCorrel():
@@ -66,55 +68,69 @@ void GpGpuInterfaceCorrel::SetParameter(int nbLayer , ushort2 dRVig , uint2 dimI
 
 void GpGpuInterfaceCorrel::BasicCorrelation()
 {
-    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] BasicCorrelation ENTER idBuf=%d\n", (int)GetIdBuf());
+    // Phase B: map host ring buffer id → CUDA stream/slot.
+    const int s = (int)(GetIdBuf() % (ushort)NSTREAM);
+    const int activeSlots = gpgpu_budget::ClampActiveSlots(NSTREAM);
+    const int slot = (s < activeSlots) ? s : 0;
+    cudaStream_t stream = *(GetStream(slot));
 
-    // Re-allocation les structures de donnees si elles ont ete modifiees
+    GPGPU_DIAG_FULL(
+        "[GPGPU][RUNPOD_GPGPU_DIAG] BasicCorrelation ENTER idBuf=%d slot=%d NSTREAM=%d pipeline=%d\n",
+        (int)GetIdBuf(), slot, NSTREAM, gpgpu_pipeline::PipelineEnabled() ? 1 : 0);
 
-    Data().ReallocDeviceData(Param(GetIdBuf()));
-    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] BasicCorrelation after ReallocDeviceData\n");
+    // Re-allocation for this stream slot only (preserve other in-flight volumes).
+    Data().ReallocDeviceDataSlot((uint)slot, Param(GetIdBuf()));
+    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] BasicCorrelation after ReallocDeviceDataSlot\n");
 
-    // copie des donnees du host vers le device
+    // Phase C: ensure texture objects exist for multi-stream-safe sampling path.
+    Data().EnsureTextureObjects((uint)slot);
 
-    Data().copyHostToDevice(Param(GetIdBuf()));
-    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] BasicCorrelation after copyHostToDevice\n");
+    // H2D proj on stream (async when pipeline on).
+    if (gpgpu_pipeline::PipelineEnabled())
+        Data().copyHostToDeviceASync(Param(GetIdBuf()), (uint)slot, stream);
+    else
+        Data().copyHostToDevice(Param(GetIdBuf()), (uint)slot);
+    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] BasicCorrelation after copyHostToDevice slot=%d\n", slot);
 
-    // Indique que la copie est terminee pour le thread de calcul des projections
+    // Host may prep next ring buffer after H2D is enqueued (pipeline) / done (legacy).
     SetPreComp(true);
 
-    // Lancement du calcul de correlation
-    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] BasicCorrelation CorrelationGpGpu BEGIN\n");
-    CorrelationGpGpu(GetIdBuf());
-    {
-        cudaError_t err = cudaDeviceSynchronize();
-        if (err != cudaSuccess)
-            GPGPU_DIAG_ERR("[GPGPU][RUNPOD_GPGPU_DIAG] ERROR after CorrelationGpGpu: %s\n", cudaGetErrorString(err));
-        else
-            GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] BasicCorrelation CorrelationGpGpu END (sync ok)\n");
-    }
+    // Correl then multi-correl on the SAME stream (ordering without device-wide sync).
+    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] BasicCorrelation CorrelationGpGpu BEGIN slot=%d\n", slot);
+    CorrelationGpGpu(GetIdBuf(), slot);
 
-    // relacher la texture de projection
+    // Multi does not need proj texture; unbind proj for this slot after correl.
+    Data().UnBindTextureProj((uint)slot);
 
-    Data().UnBindTextureProj();
+    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] BasicCorrelation MultiCorrelationGpGpu BEGIN slot=%d\n", slot);
+    MultiCorrelationGpGpu(GetIdBuf(), slot);
 
-    // Lancement du calcul de multi-correlation
-    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] BasicCorrelation MultiCorrelationGpGpu BEGIN\n");
-    MultiCorrelationGpGpu(GetIdBuf());
-    {
-        cudaError_t err = cudaDeviceSynchronize();
-        if (err != cudaSuccess)
-            GPGPU_DIAG_ERR("[GPGPU][RUNPOD_GPGPU_DIAG] ERROR after MultiCorrelationGpGpu: %s\n", cudaGetErrorString(err));
-        else
-            GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] BasicCorrelation MultiCorrelationGpGpu END (sync ok)\n");
-    }
-    // Peak VRAM while correl volumes still resident (auto NbProc probe).
+    // Peak VRAM while correl volumes still resident.
     gpgpu_auto::SampleGpuNow();
 
-    // Copier les resultats de calcul des couts du device vers le host!
+    // D2H cost on stream.
+    if (gpgpu_pipeline::PipelineEnabled())
+        Data().CopyDevicetoHostASync(GetIdBuf(), (uint)slot, stream);
+    else
+        Data().CopyDevicetoHost(GetIdBuf(), (uint)slot);
 
-    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] BasicCorrelation CopyDevicetoHost BEGIN\n");
-    Data().CopyDevicetoHost(GetIdBuf());
-    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] BasicCorrelation EXIT\n");
+    // Host must see costs before consuming: stream sync (hot path) or full device for diag.
+    if (GpgpuDiagFull() || !gpgpu_pipeline::PipelineEnabled())
+    {
+        cudaError_t err = cudaDeviceSynchronize();
+        if (err != cudaSuccess)
+            GPGPU_DIAG_ERR("[GPGPU][RUNPOD_GPGPU_DIAG] ERROR after correl pipeline device sync: %s\n",
+                    cudaGetErrorString(err));
+    }
+    else
+    {
+        cudaError_t err = cudaStreamSynchronize(stream);
+        if (err != cudaSuccess)
+            GPGPU_DIAG_ERR("[GPGPU][RUNPOD_GPGPU_DIAG] ERROR after correl pipeline stream sync: %s\n",
+                    cudaGetErrorString(err));
+    }
 
+    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] BasicCorrelation EXIT slot=%d\n", slot);
 }
 
 cudaStream_t* GpGpuInterfaceCorrel::GetStream( int stream )
@@ -148,12 +164,12 @@ void GpGpuInterfaceCorrel::SetTexturesAreLoaded(bool load)
 
 void GpGpuInterfaceCorrel::CorrelationGpGpu(ushort idBuf,const int s )
 {
-    LaunchKernelCorrelation(s, *(GetStream(s)),_param[idBuf], _data2Cor);    
+    LaunchKernelCorrelation(s, *(GetStream(s)),_param[idBuf], _data2Cor);
 }
 
 void GpGpuInterfaceCorrel::MultiCorrelationGpGpu(ushort idBuf, const int s)
 {
-    LaunchKernelMultiCorrelation( *(GetStream(s)),_param[idBuf],  _data2Cor);
+    LaunchKernelMultiCorrelation( *(GetStream(s)),_param[idBuf],  _data2Cor, s);
 }
 
 pCorGpu& GpGpuInterfaceCorrel::Param(ushort idBuf)

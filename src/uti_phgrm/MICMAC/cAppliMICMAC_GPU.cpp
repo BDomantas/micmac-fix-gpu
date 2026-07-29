@@ -1817,9 +1817,9 @@ void cAppliMICMAC::DoGPU_Correl
 #ifdef  NVTOOLS
         GpGpuTools::NvtxR_Push(__FUNCTION__,0xFFAA0033);
 #endif
-        IMmGg.Data().MemsetHostVolumeProj(IMmGg.Param(idBuf).invPC.IntDefault);
+        IMmGg.Data().MemsetHostVolumeProj(IMmGg.Param(idBuf).invPC.IntDefault, (uint)idBuf);
 
-		float2*		pTabProj	=	IMmGg.Data().HostVolumeProj();      // Pointeur sur le buffer des projections
+		float2*		pTabProj	=	IMmGg.Data().HostVolumeProj((uint)idBuf); // Phase B: host proj ring slot
 		const Rect  zone        =	IMmGg.Param(idBuf).RDTer();         // Zone Terrain dilat�
 		const uint  sample      =	IMmGg.Param(idBuf).invPC.sampProj;  // Sample
 		const uint2	dimTabProj	=	zone.dimension();					// Dimension de la zone terrain

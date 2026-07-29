@@ -28,7 +28,7 @@
 extern "C" void	CopyParamTodevice(pCorGpu h);
 extern "C" void CopyParamInvTodevice( pCorGpu param );
 extern "C" void	LaunchKernelCorrelation(const int s,cudaStream_t stream,pCorGpu &param,SData2Correl &dataCorrel);
-extern "C" void	LaunchKernelMultiCorrelation(cudaStream_t stream, pCorGpu &param, SData2Correl &dataCorrel);
+extern "C" void	LaunchKernelMultiCorrelation(cudaStream_t stream, pCorGpu &param, SData2Correl &dataCorrel, const int s = 0);
 
 extern "C" void dilateKernel(pixel* HostDataOut, short r, uint2 dim);
 extern "C" void	LaunchKernelprojectionImage(pCorGpu &param,CuDeviceData3D<float>  &DeviImagesProj);
@@ -55,7 +55,7 @@ public:
   pCorGpu&      Param(ushort idBuf);
 
   ///
-  /// \brief signalComputeCorrel Signal le debut d'une corrélation
+  /// \brief signalComputeCorrel Signal le debut d'une corrï¿½lation
   /// \param dZ
   ///
   void          signalComputeCorrel(uint dZ);
@@ -80,31 +80,31 @@ public:
 
   ///
   /// \brief Data
-  /// \return les données de corrélation
+  /// \return les donnï¿½es de corrï¿½lation
   ///
   SData2Correl& Data();
 
   ///
   /// \brief VolumeCost
   /// \param id
-  /// \return Le volume de corrélation
+  /// \return Le volume de corrï¿½lation
   ///
   float*        VolumeCost(ushort id);
 
   ///
   /// \brief TexturesAreLoaded
-  /// \return Vraie si les images sont chargées dans le device
+  /// \return Vraie si les images sont chargï¿½es dans le device
   ///
   bool          TexturesAreLoaded();
 
   ///
-  /// \brief SetTexturesAreLoaded Définir si les images sont chargées dans le device
+  /// \brief SetTexturesAreLoaded Dï¿½finir si les images sont chargï¿½es dans le device
   /// \param load
   ///
   void          SetTexturesAreLoaded(bool load);  
 
   ///
-  /// \brief ReallocHostData Réallouer la mémoire dans l'hote
+  /// \brief ReallocHostData Rï¿½allouer la mï¿½moire dans l'hote
   /// \param interZ
   /// \param idBuff
   ///
@@ -118,13 +118,13 @@ public:
 
   ///
   /// \brief MaskVolumeBlock
-  /// \return Un vecteur des cellules à corréler
+  /// \return Un vecteur des cellules ï¿½ corrï¿½ler
   ///
   std::vector<cellules> &MaskVolumeBlock();
 
   ///
   /// \brief NoMasked
-  /// Paramètre qui indique si les cellules doivent etre calculer
+  /// Paramï¿½tre qui indique si les cellules doivent etre calculer
   bool              NoMasked;
 
 private:

@@ -17,7 +17,8 @@ typedef unsigned char pixel;
 #define NEAREST		0
 #define LINEARINTER	1
 #define BICUBIC		2
-#define NSTREAM		1
+// Phase B: multi-stream Z pipeline (slots = streams). Keep ≤2 until more proj tex refs.
+#define NSTREAM		2
 #define DISPLAYOUTPUT
 
 #define OPTIMZ      1

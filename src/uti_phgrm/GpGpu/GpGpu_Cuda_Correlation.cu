@@ -406,26 +406,33 @@ template<ushort SIZE3VIGN > __global__ void multiCorrelationKernel(ushort2* clas
 
 }
 
-template<ushort SIZE3VIGN > void LaunchKernelMultiCor(cudaStream_t stream, pCorGpu &param, SData2Correl &dataCorrel)
+template<ushort SIZE3VIGN > void LaunchKernelMultiCor(cudaStream_t stream, pCorGpu &param, SData2Correl &dataCorrel, const int s)
 {
     //-------------	calcul de dimension du kernel de multi-correlation NON ATOMIC ------------
-    //uint2	nbActThr	= SIZE3VIGN - make_uint2( SIZE3VIGN % param.invPC.dimVig.x, SIZE3VIGN % param.invPC.dimVig.y);
+    // Phase B: volumes must match stream/slot s (never hard-code 0).
+    const int slot = (s >= 0 && s < NSTREAM) ? s : 0;
     dim3	threads(SIZE3VIGN, SIZE3VIGN, 1);
     uint2	block2D	= iDivUp(param.HdPc.dimCach,SIZE3VIGN);
     dim3	blocks(block2D.x,block2D.y,param.ZCInter);
 
-    multiCorrelationKernel<SIZE3VIGN><<<blocks, threads, 0, stream>>>(dataCorrel.DeviClassEqui(),dataCorrel.DeviVolumeCost(0), dataCorrel.DeviVolumeCache(0), dataCorrel.DeviVolumeNOK(0),param.HdPc);
+    multiCorrelationKernel<SIZE3VIGN><<<blocks, threads, 0, stream>>>(
+        dataCorrel.DeviClassEqui(),
+        dataCorrel.DeviVolumeCost(slot),
+        dataCorrel.DeviVolumeCache(slot),
+        dataCorrel.DeviVolumeNOK(slot),
+        param.HdPc);
     getLastCudaError("Multi-Correlation NON ATOMIC kernel failed");
 }
 
 /// \brief Fonction qui lance les kernels de multi-Correlation n'utilisant pas des fonctions atomiques
-extern "C" void LaunchKernelMultiCorrelation(cudaStream_t stream, pCorGpu &param, SData2Correl &dataCorrel)
+/// \param s stream/slot index — multi-correl volumes must match correl volumes for this slot.
+extern "C" void LaunchKernelMultiCorrelation(cudaStream_t stream, pCorGpu &param, SData2Correl &dataCorrel, const int s)
 {
     const ushort ray = param.invPC.rayVig.x;
     if (ray == 1 || ray == 2)
-        LaunchKernelMultiCor<SBLOCKDIM>(stream, param, dataCorrel);
+        LaunchKernelMultiCor<SBLOCKDIM>(stream, param, dataCorrel, s);
     else if (ray == 3)
-        LaunchKernelMultiCor<7*2>(stream, param, dataCorrel);
+        LaunchKernelMultiCor<7*2>(stream, param, dataCorrel, s);
     else
     {
         // Stock silently no-oped unsupported rayVig — that looks like a hang downstream.

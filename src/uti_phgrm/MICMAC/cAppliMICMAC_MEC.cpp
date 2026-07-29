@@ -43,6 +43,7 @@ Header-MicMac-eLiSe-25/06/2007*/
 #if CUDA_ENABLED
 #include "GpGpu/GpGpu_AutoNbProc.h"
 #include "GpGpu/GpGpu_Pipeline.h"
+#include "GpGpu/GpGpu_Budget.h"
 #endif
 #include "../src/uti_phgrm/MICMAC/MICMAC.h"
 
@@ -505,6 +506,22 @@ std::cout << "CCMMM = " << aBoxClip._p0 << " " << aBoxClip._p1 << "\n"; getchar(
             "[GPGPU][PIPELINE] etape Num=%d DeZoom=%d boxes=%d mode=inprocess pid=%d\n",
             anEtape.Num(), anEtape.DeZoomTer(), aDecInterv.NbInterv(),
             gpgpu_pipeline::SelfPid());
+        // Phase E: slot budget + optional host prefetch (sequential prep while GPU runs next).
+        {
+            const int slots = gpgpu_budget::ClampActiveSlots(NSTREAM);
+            GPGPU_DIAG_MIN(
+                "[GPGPU][BUDGET] max_slots=%d safety=%.2f prefetch=%d NSTREAM=%d\n",
+                slots, gpgpu_budget::SafetyFrac(),
+                gpgpu_budget::PrefetchEnabled() ? 1 : 0, NSTREAM);
+            if (gpgpu_budget::PrefetchEnabled())
+            {
+                // Host prefetch is sequential LoadNappes/LoadImage in DoOneBloc of box k+1
+                // after box k completes GPU work (no parallel Elise — thread-safety).
+                GPGPU_DIAG_MIN(
+                    "[GPGPU][PREFETCH] enabled: next-box host prep after current box GPU drain "
+                    "(single-threaded; no concurrent texture upload)\n");
+            }
+        }
      }
 
      bool aDidProbeBox = false;

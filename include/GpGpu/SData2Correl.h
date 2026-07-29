@@ -4,6 +4,7 @@
 /*@{*/
 
 #include "GpGpu/GpGpu_ParamCorrelation.cuh"
+#include <cuda_runtime.h>
 
 /// \cond
 extern "C" textureReference&    getMaskGlobal();
@@ -68,21 +69,25 @@ public:
 	///
 	/// \brief MemsetHostVolumeProj Initialise la memoire des projections par une valeur iDef
 	/// \param iDef
+	/// \param id slot (SIZERING); if >= SIZERING, fill all slots
 	///
-    void    MemsetHostVolumeProj(int iDef);
+    void    MemsetHostVolumeProj(int iDef, uint id = 0xFFFFFFFFu);
 
 	///
 	/// \brief HostVolumeCost
 	/// \param id
-	/// \return le pointeur host du volume de corrélation
+	/// \return le pointeur host du volume de corrï¿½lation
 	///
     float*  HostVolumeCost(uint id);
 
 	///
 	/// \brief HostVolumeProj
-	/// \return le pointeur host du volume de projection
+	/// \return le pointeur host du volume de projection (slot 0 legacy)
 	///
     float2* HostVolumeProj();
+
+	/// Phase B: per-slot host projection ring (id < SIZERING / NSTREAM).
+	float2* HostVolumeProj(uint id);
 
 	///
 	/// \brief HostRect
@@ -100,7 +105,7 @@ public:
 	///
 	/// \brief DeviVolumeCache
 	/// \param s
-	/// \return le pointeur device du cache des vecteurs centrés
+	/// \return le pointeur device du cache des vecteurs centrï¿½s
 	///
     float*  DeviVolumeCache(uint s);
 
@@ -118,18 +123,24 @@ public:
 	uint2*	DeviRect();
 
 	///
-	/// \brief copyHostToDevice Copie les données vers le device
+	/// \brief copyHostToDevice Copie les donnï¿½es vers le device
 	/// \param param
 	/// \param s
 	///
     void    copyHostToDevice(pCorGpu param, uint s = 0);
 
+	/// Phase B: async H2D of projection slot s on cuda stream.
+	void    copyHostToDeviceASync(pCorGpu param, uint s, cudaStream_t stream);
+
 	///
-	/// \brief CopyDevicetoHost Copie les données vers le host
+	/// \brief CopyDevicetoHost Copie les donnï¿½es vers le host
 	/// \param idBuf
 	/// \param s
 	///
     void    CopyDevicetoHost(uint idBuf, uint s = 0);
+
+	/// Phase B: async D2H of cost volume for stream slot s.
+	void    CopyDevicetoHostASync(uint idBuf, uint s, cudaStream_t stream);
 
 	///
 	/// \brief UnBindTextureProj relacher les textures sur le device
@@ -137,25 +148,38 @@ public:
 	///
     void    UnBindTextureProj(uint s = 0);
 
+	/// Realloc + memset a single stream slot (avoid touching other in-flight slots).
+	void    ReallocDeviceDataSlot(uint s, pCorGpu &param);
+
+	/// Phase C: create cuda texture objects for images/masks/projections (stream-safe).
+	void    EnsureTextureObjects(uint s = 0);
+	void    DestroyTextureObjects();
+	cudaTextureObject_t TexObjImages() const { return _texObjImages; }
+	cudaTextureObject_t TexObjMaskImages() const { return _texObjMaskImages; }
+	cudaTextureObject_t TexObjMaskGlobal() const { return _texObjMaskGlobal; }
+	cudaTextureObject_t TexObjProj(uint s) const {
+		return (s < (uint)NSTREAM) ? _texObjProj[s] : 0;
+	}
+
 	///
-	/// \brief DeallocHostData Desalloue la mémoire host
+	/// \brief DeallocHostData Desalloue la mï¿½moire host
 	///
     void    DeallocHostData();
 
 	///
-	/// \brief DeallocDeviceData Désalloue la mémoire device
+	/// \brief DeallocDeviceData Dï¿½salloue la mï¿½moire device
 	///
     void    DeallocDeviceData();
 
 	///
-	/// \brief ReallocHostData réalloue la mémoire host
+	/// \brief ReallocHostData rï¿½alloue la mï¿½moire host
 	/// \param zInter
 	/// \param param
 	///
     void    ReallocHostData(uint zInter, pCorGpu param);
 
 	///
-	/// \brief ReallocHostData réalloue la mémoire host
+	/// \brief ReallocHostData rï¿½alloue la mï¿½moire host
 	/// \param zInter
 	/// \param param
 	/// \param idBuff
@@ -163,30 +187,30 @@ public:
     void    ReallocHostData(uint zInter, pCorGpu param, uint idBuff);
 
 	///
-	/// \brief ReallocDeviceData réalloue la mémoire device
+	/// \brief ReallocDeviceData rï¿½alloue la mï¿½moire device
 	/// \param param
 	///
     void    ReallocDeviceData(pCorGpu &param);   
 
 	///
 	/// \brief HostClassEqui
-	/// \return Le pointeur des classes d'équivalence
+	/// \return Le pointeur des classes d'ï¿½quivalence
 	///
     ushort2 *HostClassEqui();
 
 	///
-	/// \brief ReallocConstData Réallocation des données constantes
+	/// \brief ReallocConstData Rï¿½allocation des donnï¿½es constantes
 	/// \param nbImages
 	///
 	void    ReallocConstData(uint nbImages);
 
 	///
-	/// \brief SyncConstData Synchronise les données constantes sur le device
+	/// \brief SyncConstData Synchronise les donnï¿½es constantes sur le device
 	///
 	void    SyncConstData();
 
 	///
-	/// \brief SetZoneImage Définir les dimensions des images
+	/// \brief SetZoneImage Dï¿½finir les dimensions des images
 	/// \param idImage
 	/// \param sizeImage
 	/// \param r
@@ -195,7 +219,7 @@ public:
 
 	///
 	/// \brief DeviClassEqui
-	/// \return Le pointeur device des classes d'équivalence
+	/// \return Le pointeur device des classes d'ï¿½quivalence
 	///
     ushort2 *DeviClassEqui();
 
@@ -215,8 +239,9 @@ private:
 
     textureReference& GetTeXProjection( int TexSel );
 
-    CuHostData3D<float>         _hVolumeCost[2];
-    CuHostData3D<float2>        _hVolumeProj;
+    CuHostData3D<float>         _hVolumeCost[SIZERING];
+    /// Phase B: dual (SIZERING) host projection buffers for concurrent H2D.
+    CuHostData3D<float2>        _hVolumeProj[SIZERING];
 
     // TODO il semblerait qu'un uint2 suffirai....
     ///
@@ -242,7 +267,7 @@ private:
 
 
     CuDeviceData3D<float>       _d_volumeCost[NSTREAM];	// volume des couts
-    CuDeviceData3D<float>       _d_volumeCach[NSTREAM];	// volume des calculs intermédiaires
+    CuDeviceData3D<float>       _d_volumeCach[NSTREAM];	// volume des calculs intermï¿½diaires
     CuDeviceData3D<uint>        _d_volumeNIOk[NSTREAM];	// nombre d'image correct pour une vignette
 
     ImageGpGpu<pixel,cudaContext>           _dt_GlobalMask;
@@ -256,7 +281,18 @@ private:
     textureReference&           _texProjections_00;
     textureReference&           _texProjections_01;
 
+    // Phase C: texture objects (non-global bind model for multi-stream safety).
+    cudaTextureObject_t         _texObjImages;
+    cudaTextureObject_t         _texObjMaskImages;
+    cudaTextureObject_t         _texObjMaskGlobal;
+    cudaTextureObject_t         _texObjProj[NSTREAM];
+    bool                        _texObjReady;
+
     void DeviceMemset(pCorGpu &param, uint s = 0);
+
+    static cudaTextureObject_t CreateLayeredTexObj(cudaArray * arr, bool linearFilter);
+    static cudaTextureObject_t Create2DTexObj(cudaArray * arr, bool linearFilter);
+    static void DestroyTexObj(cudaTextureObject_t & obj);
 };
 
 /*@}*/
