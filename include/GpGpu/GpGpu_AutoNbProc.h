@@ -163,6 +163,25 @@ inline void SampleGpuNow()
         s.hostRssKb = rss;
 }
 
+/// Peak VRAM used during active sampling window (0 if no samples).
+inline size_t PeakUsedBytes()
+{
+    PeakState & s = State();
+    if (s.sampleCount == 0 || s.totalBytes == 0 || s.minFreeBytes == (size_t)-1)
+        return 0;
+    return (s.totalBytes > s.minFreeBytes) ? (s.totalBytes - s.minFreeBytes) : s.totalBytes;
+}
+
+inline size_t PeakTotalBytes()
+{
+    return State().totalBytes;
+}
+
+inline size_t PeakMinFreeBytes()
+{
+    return State().minFreeBytes;
+}
+
 /// userMax: requested ByProcess/NbProc from CLI (>=1). Returns N in [1, min(userMax, MaxCap())].
 inline int ComputeNbProc(int userMax)
 {

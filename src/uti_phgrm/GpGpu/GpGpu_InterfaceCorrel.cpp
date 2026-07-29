@@ -91,7 +91,7 @@ void GpGpuInterfaceCorrel::BasicCorrelation()
 {
     // Phase B: map host ring buffer id → CUDA stream/slot.
     const int s = (int)(GetIdBuf() % (ushort)NSTREAM);
-    const int activeSlots = gpgpu_budget::ClampActiveSlots(NSTREAM);
+    const int activeSlots = gpgpu_budget::GetActiveSlotsRuntime();
     const int slot = (s < activeSlots) ? s : 0;
     cudaStream_t stream = *(GetStream(slot));
 
@@ -117,11 +117,10 @@ void GpGpuInterfaceCorrel::BasicCorrelation()
     SetPreComp(true);
 
     // Correl then multi-correl on the SAME stream (ordering without device-wide sync).
+    // Phase C: correl samples texture objects — do NOT UnBindTextureProj while kernels
+    // may still be in flight (stream-ordered). Multi-correl uses only device volumes.
     GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] BasicCorrelation CorrelationGpGpu BEGIN slot=%d\n", slot);
     CorrelationGpGpu(GetIdBuf(), slot);
-
-    // Multi does not need proj texture; unbind proj for this slot after correl.
-    Data().UnBindTextureProj((uint)slot);
 
     GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] BasicCorrelation MultiCorrelationGpGpu BEGIN slot=%d\n", slot);
     MultiCorrelationGpGpu(GetIdBuf(), slot);

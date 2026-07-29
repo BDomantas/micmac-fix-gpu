@@ -983,6 +983,15 @@ public:
         return _dD->ErrorOutput(cudaMemcpy( _dD->pData(),hostData, _dD->Sizeof(), cudaMemcpyHostToDevice),__FUNCTION__);
     }
 
+    /// Phase D: async H2D (host must be page-locked for best overlap).
+    bool    CopyHostToDeviceASync(T *hostData, cudaStream_t stream)
+    {
+        return _dD->ErrorOutput(
+            cudaMemcpyAsync(_dD->pData(), hostData, _dD->Sizeof(),
+                            cudaMemcpyHostToDevice, stream),
+            __FUNCTION__);
+    }
+
     bool    MemsetAsync(int val, cudaStream_t stream)
     {
         return  _dD->ErrorOutput(cudaMemsetAsync(_dD->pData(), val, _dD->Sizeof(), stream ),__FUNCTION__);

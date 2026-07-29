@@ -48,12 +48,32 @@ inline __device__ float GetImageValue(float2 ptProj, uint mZ)
 #endif
 }
 
+/// Phase C: sample images via texture object (preferred multi-stream path).
+inline __device__ float GetImageValueObj(cudaTextureObject_t texImg, float2 ptProj, uint mZ)
+{
+#if	INTERPOLA == NEAREST
+	return tex2DLayered<float>(texImg, ptProj.x, ptProj.y, (int)mZ);
+#else
+	return tex2DLayeredPtObj<float>(texImg, ptProj, (short)mZ);
+#endif
+}
+
 template<int TexSel> inline  __device__ float2 GetProjection(uint2 ptTer, uint sampProj, uint BZ)
 {
 #if (SAMPLETERR == 1)
     return tex2DLayeredPt(TexFloat2L<TexSel>(),ptTer,BZ);
 #else
 	return tex2DLayeredPt(TexFloat2L<TexSel>(),ptTer,sampProj,BZ);
+#endif
+}
+
+/// Phase C: projection sample from per-slot texture object.
+inline __device__ float2 GetProjectionObj(cudaTextureObject_t texProj, uint2 ptTer, uint sampProj, uint BZ)
+{
+#if (SAMPLETERR == 1)
+    return tex2DLayeredPtObj<float2>(texProj, ptTer, 1, (short)BZ);
+#else
+    return tex2DLayeredPtObj<float2>(texProj, ptTer, (short)sampProj, (short)BZ);
 #endif
 }
 

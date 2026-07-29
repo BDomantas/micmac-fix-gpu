@@ -4,10 +4,22 @@
 #include "GpGpu/GpGpu_Diag.h"
 #include "GpGpu/GpGpu_AutoNbProc.h"
 #include "GpGpu/GpGpu_Pipeline.h"
+#include "GpGpu/GpGpu_Budget.h"
+
+// Optional host callback run after optim kernel is enqueued (before stream drain).
+// Used for cross-box host prefetch while GPU optim runs.
+static void (*g_optimPrefetchFn)(void *) = 0;
+static void *g_optimPrefetchCtx = 0;
+
+extern "C" void GpGpu_SetOptimPrefetchHook(void (*fn)(void *), void *ctx)
+{
+    g_optimPrefetchFn = fn;
+    g_optimPrefetchCtx = ctx;
+}
 
 InterfOptimizGpGpu::InterfOptimizGpGpu()
 {
-    //CreateJob();
+    _optStream = 0;
     checkCudaErrors(cudaStreamCreate(&_optStream));
     freezeCompute();
 }
@@ -16,6 +28,7 @@ InterfOptimizGpGpu::~InterfOptimizGpGpu()
 {
     if (_optStream)
         cudaStreamDestroy(_optStream);
+    _optStream = 0;
 }
 
 void InterfOptimizGpGpu::Dealloc()
@@ -67,17 +80,29 @@ void InterfOptimizGpGpu::optimisation()
 
     _D_data2Opt.ReallocIf(_H_data2Opt);
 
-    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] optimisation CopyHostToDevice BEGIN\n");
-    // Phase D: keep sync H2D API (Data2Optimiz lacks stream async wrappers);
-    // kernel runs on optim stream; host waits via stream sync when pipeline on.
-    _D_data2Opt.CopyHostToDevice(_H_data2Opt,GetIdBuf());
+    const bool pipe = gpgpu_pipeline::PipelineEnabled();
+
+    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] optimisation CopyHostToDevice BEGIN async=%d\n",
+                    pipe ? 1 : 0);
+    if (pipe)
+        _D_data2Opt.CopyHostToDeviceASync(_H_data2Opt, GetIdBuf(), _optStream);
+    else
+        _D_data2Opt.CopyHostToDevice(_H_data2Opt,GetIdBuf());
     GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] optimisation CopyHostToDevice END\n");
 
     SetPreComp(true);
 
     GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] optimisation Gpu_OptimisationOneDirection BEGIN\n");
     Gpu_OptimisationOneDirection(_D_data2Opt, _optStream);
-    if (gpgpu_pipeline::PipelineEnabled() && !GpgpuDiagFull())
+
+    // Phase E: while optim kernel runs on stream, allow host to prep next box.
+    if (pipe && g_optimPrefetchFn)
+    {
+        GPGPU_DIAG_MIN("[GPGPU][PREFETCH] host next-box prep during optim stream\n");
+        g_optimPrefetchFn(g_optimPrefetchCtx);
+    }
+
+    if (pipe && !GpgpuDiagFull())
     {
         cudaError_t err = cudaStreamSynchronize(_optStream);
         if (err != cudaSuccess)
@@ -97,8 +122,18 @@ void InterfOptimizGpGpu::optimisation()
     }
     gpgpu_auto::SampleGpuNow();
 
-    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] optimisation CopyDevicetoHost BEGIN\n");
-    _D_data2Opt.CopyDevicetoHost(_H_data2Opt,GetIdBuf());
+    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] optimisation CopyDevicetoHost BEGIN async=%d\n",
+                    pipe ? 1 : 0);
+    if (pipe)
+    {
+        _D_data2Opt.CopyDevicetoHostASync(_H_data2Opt, GetIdBuf(), _optStream);
+        cudaError_t err = cudaStreamSynchronize(_optStream);
+        if (err != cudaSuccess)
+            GPGPU_DIAG_ERR("[GPGPU][RUNPOD_GPGPU_DIAG] ERROR after optim D2H stream sync: %s\n",
+                    cudaGetErrorString(err));
+    }
+    else
+        _D_data2Opt.CopyDevicetoHost(_H_data2Opt,GetIdBuf());
     GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] optimisation EXIT\n");
 }
 

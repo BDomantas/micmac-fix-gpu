@@ -40,12 +40,12 @@ struct st_line
 
 ///
 /// \brief The p_ReadLine struct
-/// Structure de paramètres pour la programmation dynamique en CUDA
+/// Structure de paramï¿½tres pour la programmation dynamique en CUDA
 struct p_ReadLine
 {
 	///
 	/// \brief ID_Bf_Icost
-	///	Curseur de position dans le buffer des couts intrinsèques
+	///	Curseur de position dans le buffer des couts intrinsï¿½ques
     ushort          ID_Bf_Icost;
 	///
 	/// \brief line
@@ -57,7 +57,7 @@ struct p_ReadLine
     st_line         seg;
 	///
 	/// \brief Id_Buf
-	/// Identifiant du buffer courrant en mémoire partagée
+	/// Identifiant du buffer courrant en mï¿½moire partagï¿½e
     bool            Id_Buf;
 	///
 	/// \brief tid
@@ -69,11 +69,11 @@ struct p_ReadLine
     const ushort    itid;
 	///
 	/// \brief prev_Dz
-	/// Delta Z de la nappe de la position précédente
+	/// Delta Z de la nappe de la position prï¿½cï¿½dente
     short2          prev_Dz;
 	///
 	/// \brief prevDefCor
-	/// Cout min de la cellule defCor précédente
+	/// Cout min de la cellule defCor prï¿½cï¿½dente
     ushort          prevDefCor;
 	///
 	/// \brief pente
@@ -81,12 +81,12 @@ struct p_ReadLine
     ushort          pente;
 	///
 	/// \brief ZRegul
-	/// Paramètre Z Régulation
+	/// Paramï¿½tre Z Rï¿½gulation
     float           ZRegul;
 
 	///
 	/// \brief ZRegul_Quad
-	/// Paramètre Z Régulation
+	/// Paramï¿½tre Z Rï¿½gulation
     float           ZRegul_Quad;
 	///
 	/// \brief costDefMask
@@ -102,7 +102,7 @@ struct p_ReadLine
     const bool      hasMaskauto;
 	///
 	/// \brief sizeBuffer
-	/// Taille des buffers en mémoire partagée
+	/// Taille des buffers en mï¿½moire partagï¿½e
     const ushort    sizeBuffer;
 
 	///
@@ -137,7 +137,7 @@ struct p_ReadLine
 	__device__ inline
 	///
 	/// \brief swBuf
-	/// Changer de buffer en mémoire partagée
+	/// Changer de buffer en mï¿½moire partagï¿½e
 	void swBuf()
     {
         Id_Buf = !Id_Buf;
@@ -225,7 +225,7 @@ ushort p_ReadLine::stid<false>()
 template<template<class T> class U, uint NBUFFER = 1 >
 ///
 /// \brief The Data2Optimiz struct
-/// Structure de données pour la régularisation en gpgpu
+/// Structure de donnï¿½es pour la rï¿½gularisation en gpgpu
 struct Data2Optimiz
 {
 public:
@@ -246,7 +246,7 @@ public:
     void ReallocParam(uint size);
 
 	///
-	/// \brief SetParamLine Définir les paramètres de la ligne
+	/// \brief SetParamLine Dï¿½finir les paramï¿½tres de la ligne
 	/// \param id
 	/// \param pStr
 	/// \param pIdStr
@@ -256,21 +256,21 @@ public:
     void SetParamLine(uint id, uint pStr,uint pIdStr, uint lLine, uint idbuf = 0);
 
 	///
-	/// \brief ReallocIf Réallocation de la mémoire sous condition
+	/// \brief ReallocIf Rï¿½allocation de la mï¿½moire sous condition
 	/// \param pStr
 	/// \param pIdStr
 	///
     void ReallocIf(uint pStr,uint pIdStr);
 
 	///
-	/// \brief ReallocInputIf Réallocation de la mémoire sous condition
+	/// \brief ReallocInputIf Rï¿½allocation de la mï¿½moire sous condition
 	/// \param pStr
 	/// \param pIdStr
 	///
     void ReallocInputIf(uint pStr,uint pIdStr);
 
 	///
-	/// \brief ReallocOutputIf Réallocation de la mémoire sous condition
+	/// \brief ReallocOutputIf Rï¿½allocation de la mï¿½moire sous condition
 	/// \param pStr
 	/// \param pIdStr
 	/// \param idbuf
@@ -278,44 +278,49 @@ public:
     void ReallocOutputIf(uint pStr, uint pIdStr,uint idbuf = 0);
 
 	///
-	/// \brief ReallocIf Réallocation de la mémoire sous condition
+	/// \brief ReallocIf Rï¿½allocation de la mï¿½moire sous condition
 	/// \param d2o
 	///
     void ReallocIf(Data2Optimiz<CuHostData3D,2> &d2o);
 
 	///
-	/// \brief ReallocInputIf Réallocation de la mémoire sous condition
+	/// \brief ReallocInputIf Rï¿½allocation de la mï¿½moire sous condition
 	/// \param d2o
 	///
     void ReallocInputIf(Data2Optimiz<CuHostData3D,2> &d2o);
 
 	///
-	/// \brief ReallocOutputIf Réallocation de la mémoire sous condition
+	/// \brief ReallocOutputIf Rï¿½allocation de la mï¿½moire sous condition
 	/// \param d2o
 	/// \param idbuf
 	///
     void ReallocOutputIf(Data2Optimiz<CuHostData3D,2> &d2o, uint idbuf = 0);
 
 	///
-	/// \brief SetNbLine Définir le nombre de ligne
+	/// \brief SetNbLine Dï¿½finir le nombre de ligne
 	/// \param nbl
 	///
     void SetNbLine(uint nbl);
 
 	///
-	/// \brief CopyHostToDevice Copie des données du host vers le device
+	/// \brief CopyHostToDevice Copie des donnï¿½es du host vers le device
 	/// \param d2o
 	/// \param idbuf
 	///
     void CopyHostToDevice(Data2Optimiz<CuHostData3D,2> &d2o, uint idbuf = 0);
 
+	/// Phase D: async H2D on stream (requires page-locked host buffers).
+	void CopyHostToDeviceASync(Data2Optimiz<CuHostData3D,2> &d2o, uint idbuf, cudaStream_t stream);
 
 	///
-	/// \brief CopyDevicetoHost Copie des données du device vers le host
+	/// \brief CopyDevicetoHost Copie des donnï¿½es du device vers le host
 	/// \param d2o
 	/// \param idbuf
 	///
     void CopyDevicetoHost(Data2Optimiz<CuHostData3D,2> &d2o, uint idbuf = 0);
+
+	/// Phase D: async D2H on stream.
+	void CopyDevicetoHostASync(Data2Optimiz<CuHostData3D,2> &d2o, uint idbuf, cudaStream_t stream);
 
 	///
 	/// \brief NBlines
@@ -498,10 +503,25 @@ void Data2Optimiz<U,NBUFFER>::CopyHostToDevice(Data2Optimiz<CuHostData3D, 2> &d2
 }
 
 TEMPLATE_D2OPTI
+void Data2Optimiz<U,NBUFFER>::CopyHostToDeviceASync(Data2Optimiz<CuHostData3D, 2> &d2o, uint idbuf, cudaStream_t stream)
+{
+    _s_InitCostVol.CopyHostToDeviceASync(d2o.s_InitCostVol().pData(), stream);
+    _s_Index.CopyHostToDeviceASync(d2o.s_Index().pData(), stream);
+    _param[0].CopyHostToDeviceASync(d2o.param(idbuf).pData(), stream);
+}
+
+TEMPLATE_D2OPTI
 void Data2Optimiz<U,NBUFFER>::CopyDevicetoHost(Data2Optimiz<CuHostData3D, 2> &h2o, uint idbuf)
 {
     _s_ForceCostVol[0].CopyDevicetoHost(h2o.s_ForceCostVol(idbuf));
     _s_DefCor[0].CopyDevicetoHost(h2o.s_DefCor(idbuf));
+}
+
+TEMPLATE_D2OPTI
+void Data2Optimiz<U,NBUFFER>::CopyDevicetoHostASync(Data2Optimiz<CuHostData3D, 2> &h2o, uint idbuf, cudaStream_t stream)
+{
+    _s_ForceCostVol[0].CopyDevicetoHostASync(h2o.s_ForceCostVol(idbuf).pData(), stream);
+    _s_DefCor[0].CopyDevicetoHostASync(h2o.s_DefCor(idbuf).pData(), stream);
 }
 /// \cond
 TEMPLATE_D2OPTI

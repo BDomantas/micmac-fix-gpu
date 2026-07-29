@@ -3330,6 +3330,9 @@ class cAppliMICMAC  : public   cParamMICMAC,
 			const Box2di & aBoxGlob
                       );  // Dans cAppliMICMAC_MEC.cpp
 
+	/// Phase E: load nappes for next box while current GPU optim runs (host only).
+	void GpuHostPrefetchNappes(const Box2di & aBoxOut, const Box2di & aBoxIn);
+
 
 
         REAL CalculScore();
@@ -3477,6 +3480,11 @@ class cAppliMICMAC  : public   cParamMICMAC,
         cGeomDiscFPx           *mGeomDFPx;
         cGeomDiscFPx           *mGeomDFPxInit;
         cLoadTer *              mLTer;
+        // Phase E: host nappe prefetch for next GPU box (filled during optim stream).
+        cLoadTer *              mGpuPrefetchLTer;
+        Box2di                  mGpuPrefetchBoxIn;
+        Box2di                  mGpuPrefetchBoxOut;
+        bool                    mGpuPrefetchValid;
         // Box2dr                  mBoxTer;
         Box2di                  mBoxIn;
         Box2di                  mBoxOut;

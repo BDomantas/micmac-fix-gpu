@@ -99,6 +99,33 @@ inline int ClampActiveSlots(int desired)
     return desired;
 }
 
+/// Runtime active slot depth for correl streams (set after first-box VRAM probe).
+inline int & ActiveSlotsRuntime()
+{
+    static int s = GPGPU_BUDGET_NSTREAM_DEFAULT;
+    return s;
+}
+
+inline void SetActiveSlotsRuntime(int n)
+{
+    ActiveSlotsRuntime() = ClampActiveSlots(n);
+}
+
+inline int GetActiveSlotsRuntime()
+{
+    return ClampActiveSlots(ActiveSlotsRuntime());
+}
+
+/// Derive slot depth from auto NbProc peak samples (total / peak used).
+inline int ComputeSlotsFromPeakSamples(size_t totalBytes, size_t minFreeBytes, int maxSlots)
+{
+    size_t peakUsed = (totalBytes > minFreeBytes) ? (totalBytes - minFreeBytes) : totalBytes;
+    return ComputeMaxSlots(totalBytes, peakUsed, maxSlots, SafetyFrac());
+}
+
 } // namespace gpgpu_budget
+
+// C linkage hook for optim path (defined in GpGpu_InterfaceOptimisation.cpp).
+extern "C" void GpGpu_SetOptimPrefetchHook(void (*fn)(void *), void *ctx);
 
 #endif // GPGPU_BUDGET_H

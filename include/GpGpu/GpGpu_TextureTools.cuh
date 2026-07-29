@@ -79,6 +79,19 @@ inline __device__ T tex2DLayeredPt(texture<T, cudaTextureType2DLayered> t, float
     return tex2DLayered(t, pt.x + 0.5f, pt.y + 0.5f,layer) ;
 }
 
+// Phase C: texture-object sampling (stream-safe; no global bind).
+template<class T>
+inline __device__ T tex2DLayeredPtObj(cudaTextureObject_t t, uint2 pt, short sample, short layer)
+{
+    return tex2DLayered<T>(t, (float)pt.x / sample + 0.5f, (float)pt.y / sample + 0.5f, layer);
+}
+
+template<class T>
+inline __device__ T tex2DLayeredPtObj(cudaTextureObject_t t, float2 pt, short layer)
+{
+    return tex2DLayered<T>(t, pt.x + 0.5f, pt.y + 0.5f, layer);
+}
+
 template<class T>
 inline __device__ T tex2DLayeredPt(texture<T, cudaTextureType2DLayered> t, uint2 pt, short layer)
 {

@@ -83,7 +83,8 @@ int cAppliMICMAC::GetTXY() const
 
 void cAppliMICMAC::DoAllMEC()
 {
-
+    mGpuPrefetchLTer = 0;
+    mGpuPrefetchValid = false;
 
 #if CUDA_ENABLED
 
@@ -498,6 +499,25 @@ std::cout << "CCMMM = " << aBoxClip._p0 << " " << aBoxClip._p1 << "\n"; getchar(
          ;
 
 #if CUDA_ENABLED
+     // Prefetch context: next-box host nappe load during optim stream of current box.
+     struct PrefetchCtx {
+        cAppliMICMAC * app;
+        cDecoupageInterv2D * dec;
+        Box2di boxGlob;
+        int nextK;
+        int nInterv;
+        bool hasNext;
+     };
+     PrefetchCtx aPref = { this, &aDecInterv, aBoxClip, -1, aDecInterv.NbInterv(), false };
+     auto aPrefHook = [](void * v) {
+        PrefetchCtx * c = (PrefetchCtx *)v;
+        if (!c || !c->hasNext || !c->app || !c->dec)
+            return;
+        // Single-threaded host prep of next box nappes while GPU optim runs.
+        c->app->GpuHostPrefetchNappes(
+            c->dec->KthIntervOut(c->nextK),
+            c->dec->KthIntervIn(c->nextK));
+     };
      if (aInProcessGpu)
      {
         mCout << " [GPU_PIPELINE] GPU_STAGE etape DeZoom=" << anEtape.DeZoomTer()
@@ -507,28 +527,24 @@ std::cout << "CCMMM = " << aBoxClip._p0 << " " << aBoxClip._p1 << "\n"; getchar(
             "[GPGPU][PIPELINE] etape Num=%d DeZoom=%d boxes=%d mode=inprocess pid=%d\n",
             anEtape.Num(), anEtape.DeZoomTer(), aDecInterv.NbInterv(),
             gpgpu_pipeline::SelfPid());
-        // Phase E: slot budget + optional host prefetch (sequential prep while GPU runs next).
-        {
-            const int slots = gpgpu_budget::ClampActiveSlots(NSTREAM);
-            GPGPU_DIAG_MIN(
-                "[GPGPU][BUDGET] max_slots=%d safety=%.2f prefetch=%d NSTREAM=%d\n",
-                slots, gpgpu_budget::SafetyFrac(),
-                gpgpu_budget::PrefetchEnabled() ? 1 : 0, NSTREAM);
-            if (gpgpu_budget::PrefetchEnabled())
-            {
-                // Host prefetch is sequential LoadNappes/LoadImage in DoOneBloc of box k+1
-                // after box k completes GPU work (no parallel Elise — thread-safety).
-                GPGPU_DIAG_MIN(
-                    "[GPGPU][PREFETCH] enabled: next-box host prep after current box GPU drain "
-                    "(single-threaded; no concurrent texture upload)\n");
-            }
-        }
+        gpgpu_budget::SetActiveSlotsRuntime(gpgpu_budget::MaxSlotsEnv());
+        GPGPU_DIAG_MIN(
+            "[GPGPU][BUDGET] initial max_slots=%d safety=%.2f prefetch=%d NSTREAM=%d\n",
+            gpgpu_budget::GetActiveSlotsRuntime(), gpgpu_budget::SafetyFrac(),
+            gpgpu_budget::PrefetchEnabled() ? 1 : 0, NSTREAM);
+        if (gpgpu_budget::PrefetchEnabled())
+            GpGpu_SetOptimPrefetchHook(aPrefHook, &aPref);
+        else
+            GpGpu_SetOptimPrefetchHook(0, 0);
+        mGpuPrefetchValid = false;
+        mGpuPrefetchLTer = 0;
      }
 #endif
 
      bool aDidProbeBox = false;
      int  aAutoN = aUserByP;
      int  aBoxesInProcess = 0;
+     bool aDidPipelineProbe = false;
 
      for (mKBox=0 ; mKBox<aDecInterv.NbInterv() ; mKBox++)
      {
@@ -552,6 +568,29 @@ std::cout << "CCMMM = " << aBoxClip._p0 << " " << aBoxClip._p1 << "\n"; getchar(
                if (ByProcess().Val()==0 || aInProcessGpu)
                {
                   aBoxesInProcess++;
+#if CUDA_ENABLED
+                  if (aInProcessGpu)
+                  {
+                     // Arm prefetch of next eligible box during this box's optim stream.
+                     aPref.hasNext = false;
+                     if (gpgpu_budget::PrefetchEnabled())
+                     {
+                        for (int nk = mKBox + 1; nk < aDecInterv.NbInterv(); ++nk)
+                        {
+                           if ((nk >= FirstBoiteMEC().Val()
+                                || anEtape.Num() > FirstEtapeMEC().Val())
+                               && (mNbBoitesToDo > 1))
+                           {
+                              aPref.nextK = nk;
+                              aPref.hasNext = true;
+                              break;
+                           }
+                        }
+                     }
+                     if (! aDidPipelineProbe)
+                        gpgpu_auto::ResetPeak();
+                  }
+#endif
                   DoOneBloc
                   (
                       aDecInterv.KthIntervOut(mKBox),
@@ -559,6 +598,26 @@ std::cout << "CCMMM = " << aBoxClip._p0 << " " << aBoxClip._p1 << "\n"; getchar(
                       0,
                       aBoxClip
                   );
+#if CUDA_ENABLED
+                  if (aInProcessGpu && ! aDidPipelineProbe)
+                  {
+                     // Phase E: set stream slot depth from first-box VRAM peak.
+                     int slots = gpgpu_budget::ComputeSlotsFromPeakSamples(
+                         gpgpu_auto::PeakTotalBytes(),
+                         gpgpu_auto::PeakMinFreeBytes(),
+                         gpgpu_budget::MaxSlotsEnv());
+                     gpgpu_budget::SetActiveSlotsRuntime(slots);
+                     gpgpu_auto::StopPeak();
+                     aDidPipelineProbe = true;
+                     GPGPU_DIAG_MIN(
+                         "[GPGPU][BUDGET] after probe peakUsed=%.1f MiB → **active_slots=%d** "
+                         "(max=%d safety=%.2f)\n",
+                         gpgpu_auto::PeakUsedBytes() / (1024.0 * 1024.0),
+                         gpgpu_budget::GetActiveSlotsRuntime(),
+                         gpgpu_budget::MaxSlotsEnv(),
+                         gpgpu_budget::SafetyFrac());
+                  }
+#endif
                }
                else if (aDoAutoNb && (! aDidProbeBox))
                {
@@ -601,10 +660,18 @@ std::cout << "CCMMM = " << aBoxClip._p0 << " " << aBoxClip._p1 << "\n"; getchar(
 #if CUDA_ENABLED
      if (aInProcessGpu)
      {
+        GpGpu_SetOptimPrefetchHook(0, 0);
         GPGPU_DIAG_MIN(
             "[GPGPU][PIPELINE] etape done inprocess_boxes=%d queued_process=%zu "
-            "expect_mec_gpu_procs=1 pid=%d\n",
-            aBoxesInProcess, aLStrProcess.size(), gpgpu_pipeline::SelfPid());
+            "expect_mec_gpu_procs=1 pid=%d active_slots=%d\n",
+            aBoxesInProcess, aLStrProcess.size(), gpgpu_pipeline::SelfPid(),
+            gpgpu_budget::GetActiveSlotsRuntime());
+        if (mGpuPrefetchLTer)
+        {
+           delete mGpuPrefetchLTer;
+           mGpuPrefetchLTer = 0;
+           mGpuPrefetchValid = false;
+        }
      }
 #endif
      // Process fan-out only when not in pipeline in-process mode.
@@ -706,6 +773,30 @@ std::string cAppliMICMAC::NameFileCurCube(const std::string & aName) const
 
 
 
+void cAppliMICMAC::GpuHostPrefetchNappes(const Box2di & aBoxOut, const Box2di & aBoxIn)
+{
+#if CUDA_ENABLED
+   if (! mCurEtape)
+      return;
+   if (mGpuPrefetchLTer)
+   {
+      delete mGpuPrefetchLTer;
+      mGpuPrefetchLTer = 0;
+   }
+   mGpuPrefetchLTer = new cLoadTer(mDimPx, aBoxIn.sz(), *mCurEtape);
+   mCurEtape->LoadNappesAndSetGeom(*mGpuPrefetchLTer, aBoxIn);
+   mGpuPrefetchBoxIn = aBoxIn;
+   mGpuPrefetchBoxOut = aBoxOut;
+   mGpuPrefetchValid = true;
+   GPGPU_DIAG_MIN(
+       "[GPGPU][PREFETCH] host nappes ready for next box out=[%d,%d]-[%d,%d]\n",
+       aBoxOut._p0.x, aBoxOut._p0.y, aBoxOut._p1.x, aBoxOut._p1.y);
+#else
+   (void)aBoxOut;
+   (void)aBoxIn;
+#endif
+}
+
 void cAppliMICMAC::DoOneBloc
      (
           const Box2di & aBoxOut,
@@ -732,9 +823,31 @@ void cAppliMICMAC::DoOneBloc
 
    mBoxIn = aBoxIn;
    mBoxOut = aBoxOut;
-   mLTer = new cLoadTer(mDimPx,aBoxIn.sz(),*mCurEtape);
 
-   double aNbCel = mCurEtape->LoadNappesAndSetGeom(*mLTer,aBoxIn);
+   // Phase E: adopt nappes prefetched during previous box optim stream.
+   bool aAdoptPrefetch = false;
+#if CUDA_ENABLED
+   aAdoptPrefetch = mGpuPrefetchValid && mGpuPrefetchLTer
+       && (mGpuPrefetchBoxOut._p0 == aBoxOut._p0)
+       && (mGpuPrefetchBoxOut._p1 == aBoxOut._p1)
+       && (mGpuPrefetchBoxIn._p0 == aBoxIn._p0)
+       && (mGpuPrefetchBoxIn._p1 == aBoxIn._p1);
+   if (aAdoptPrefetch)
+   {
+      mLTer = mGpuPrefetchLTer;
+      mGpuPrefetchLTer = 0;
+      mGpuPrefetchValid = false;
+      GPGPU_DIAG_MIN("[GPGPU][PREFETCH] adopted prefetched nappes for this box\n");
+   }
+#endif
+   if (! aAdoptPrefetch)
+   {
+      mLTer = new cLoadTer(mDimPx,aBoxIn.sz(),*mCurEtape);
+   }
+
+   double aNbCel = aAdoptPrefetch
+       ? (double)aBoxIn.sz().x * (double)aBoxIn.sz().y
+       : mCurEtape->LoadNappesAndSetGeom(*mLTer,aBoxIn);
 
 
    int aSzCel = mCurEtape->MultiplierNbSizeCellule();

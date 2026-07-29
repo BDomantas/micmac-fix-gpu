@@ -81,11 +81,16 @@ extern "C" void	 LaunchKernelprojectionImage(pCorGpu &param, CuDeviceData3D<floa
 
 }
 
-/// \fn template<int TexSel> __global__ void correlationKernel( uint *dev_NbImgOk, float* cachVig, uint2 nbActThrd)
-/// \brief Kernel fonction GpGpu Cuda
+/// \brief Kernel fonction GpGpu Cuda — Phase C texture-object sampling (stream-safe).
 /// Calcul les vignettes de correlation pour toutes les images
 ///
-template<int TexSel> __global__ void correlationKernel( uint *dev_NbImgOk, ushort2 *ClassEqui,float* cachVig, uint2* pRect, uint2 nbActThrd,HDParamCorrel HdPc)
+__global__ void correlationKernel(
+    uint *dev_NbImgOk, ushort2 *ClassEqui, float* cachVig, uint2* pRect, uint2 nbActThrd,
+    HDParamCorrel HdPc,
+    cudaTextureObject_t texImages,
+    cudaTextureObject_t texMaskImages,
+    cudaTextureObject_t texMaskGlobal,
+    cudaTextureObject_t texProj)
 {
 
   extern __shared__ float cacheImg[];
@@ -96,8 +101,8 @@ template<int TexSel> __global__ void correlationKernel( uint *dev_NbImgOk, ushor
   // Si le point est hors du terrain, nous sortons du kernel
   if (oSE(ptHaloTer,HdPc.dimHaloTer)  ) return;
 
-  // Obtenir la projection du point dans l'image
-  const float2 ptProj   = GetProjection<TexSel>(ptHaloTer,invPc.sampProj,blockIdx.z);
+  // Obtenir la projection du point dans l'image (per-slot tex object)
+  const float2 ptProj   = GetProjectionObj(texProj, ptHaloTer, invPc.sampProj, blockIdx.z);
 
   // Phase : obtention de la valeur dans l'image
   const uint	pitZ      = blockIdx.z / invPc.nbImages;
@@ -111,7 +116,7 @@ template<int TexSel> __global__ void correlationKernel( uint *dev_NbImgOk, ushor
   if (oI(ptProj,0) || ptProj.x >= (float)zoneImage.x || ptProj.y >= (float)zoneImage.y)
       return;
 
-  cacheImg[sgpu::__mult<BLOCKDIM>(threadIdx.y) + threadIdx.x] = GetImageValue(ptProj,idImg);
+  cacheImg[sgpu::__mult<BLOCKDIM>(threadIdx.y) + threadIdx.x] = GetImageValueObj(texImages, ptProj, idImg);
 
   __syncthreads();
 
@@ -131,9 +136,9 @@ template<int TexSel> __global__ void correlationKernel( uint *dev_NbImgOk, ushor
   // Point terrain global
   int2 coorTer = ptTer + HdPc.rTer.pt0;
 
-  if(tex2D(TexS_MaskGlobal, coorTer.x, coorTer.y) == 0) return;
+  if (tex2D<pixel>(texMaskGlobal, (float)coorTer.x, (float)coorTer.y) == 0) return;
 
-  if(tex2DLayered(TexL_MaskImages, coorTer.x, coorTer.y,idImg) == 0) return;
+  if (tex2DLayered<pixel>(texMaskImages, (float)coorTer.x, (float)coorTer.y, (int)idImg) == 0) return;
 
   const short2 c0	= make_short2(threadIdx) - invPc.rayVig;
   const short2 c1	= make_short2(threadIdx) + invPc.rayVig;
@@ -273,7 +278,7 @@ extern "C" void	 LaunchKernelGetValueImages(pCorGpu &param,SData2Correl &data2co
     hoValImage.Dealloc();
 
 }
-/// \brief Fonction qui lance les kernels de correlation
+/// \brief Fonction qui lance les kernels de correlation (texture objects, slot s).
 extern "C" void	 LaunchKernelCorrelation(const int s,cudaStream_t stream,pCorGpu &param,SData2Correl &data2cor)
 {
 
@@ -283,23 +288,33 @@ extern "C" void	 LaunchKernelCorrelation(const int s,cudaStream_t stream,pCorGpu
     uint2	block2D		= iDivUp(param.HdPc.dimHaloTer,nbActThrd);
     dim3	blocks(block2D.x , block2D.y, param.invPC.nbImages * param.ZCInter);
 
-//    CuDeviceData3D<float>       DeviImagesProj;
-//    LaunchKernelprojectionImage(param,DeviImagesProj,data2cor.DeviRect());
-//    DeviImagesProj.Dealloc();
+    const int slot = (s >= 0 && s < NSTREAM) ? s : 0;
+    data2cor.EnsureTextureObjects((uint)slot);
 
-    //LaunchKernelGetValueImages(param,data2cor);
+    cudaTextureObject_t texImg  = data2cor.TexObjImages();
+    cudaTextureObject_t texMImg = data2cor.TexObjMaskImages();
+    cudaTextureObject_t texMGlb = data2cor.TexObjMaskGlobal();
+    cudaTextureObject_t texProj = data2cor.TexObjProj((uint)slot);
 
-    switch (s)
+    // Fallback: if objects missing, abort rather than silent global-tex race.
+    if (!texImg || !texProj)
     {
-    case 0:
-        correlationKernel<0><<<blocks, threads, BLOCKDIM * BLOCKDIM * sizeof(float), stream>>>( data2cor.DeviVolumeNOK(0),data2cor.DeviClassEqui(), data2cor.DeviVolumeCache(0),data2cor.DeviRect(), nbActThrd,param.HdPc);
-        getLastCudaError("Basic Correlation kernel failed stream 0");
-        break;
-    case 1:
-        correlationKernel<1><<<blocks, threads, BLOCKDIM * BLOCKDIM* sizeof(float), stream>>>( data2cor.DeviVolumeNOK(1),data2cor.DeviClassEqui(), data2cor.DeviVolumeCache(1),data2cor.DeviRect(), nbActThrd,param.HdPc);
-        getLastCudaError("Basic Correlation kernel failed stream 1");
-        break;
+        GPGPU_DIAG_ERR(
+            "[GPGPU][PIPELINE] ERROR LaunchKernelCorrelation: missing texture objects "
+            "img=%llu proj=%llu slot=%d\n",
+            (unsigned long long)texImg, (unsigned long long)texProj, slot);
+        abort();
     }
+
+    correlationKernel<<<blocks, threads, BLOCKDIM * BLOCKDIM * sizeof(float), stream>>>(
+        data2cor.DeviVolumeNOK(slot),
+        data2cor.DeviClassEqui(),
+        data2cor.DeviVolumeCache(slot),
+        data2cor.DeviRect(),
+        nbActThrd,
+        param.HdPc,
+        texImg, texMImg, texMGlb, texProj);
+    getLastCudaError("Basic Correlation kernel failed (texture objects)");
 }
 
 
