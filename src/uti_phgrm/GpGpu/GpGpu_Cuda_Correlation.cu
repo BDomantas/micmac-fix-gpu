@@ -3,6 +3,9 @@
 #include "GpGpu/GpGpu_TextureCorrelation.cuh"
 #include "GpGpu/SData2Correl.h"
 
+#include <stdio.h>
+#include <stdlib.h>
+
 /// \file       GpGpuCudaCorrelation.cu
 /// \brief      Kernel
 /// \author     GC
@@ -82,7 +85,7 @@ template<int TexSel> __global__ void correlationKernel( uint *dev_NbImgOk, ushor
 
   extern __shared__ float cacheImg[];
 
-  // Coordonnées du terrain global avec bordure // __umul24!!!! A voir
+  // Coordonnï¿½es du terrain global avec bordure // __umul24!!!! A voir
   const uint2 ptHaloTer = make_uint2(blockIdx) * nbActThrd + make_uint2(threadIdx);
 
   // Si le point est hors du terrain, nous sortons du kernel
@@ -112,7 +115,7 @@ template<int TexSel> __global__ void correlationKernel( uint *dev_NbImgOk, ushor
 
   // Nous traitons uniquement les points du terrain du bloque ou Si le processus est hors du terrain global, nous sortons du kernel
 
-  // Sortir si threard inactif et si en dehors du terrain (à simplifier)
+  // Sortir si threard inactif et si en dehors du terrain (ï¿½ simplifier)
   if (oSE(threadIdx, nbActThrd + invPc.rayVig) || oI(threadIdx , invPc.rayVig) || oSE( ptTer, HdPc.dimTer) || oI(ptTer,0))
 	return;
 
@@ -134,7 +137,7 @@ template<int TexSel> __global__ void correlationKernel( uint *dev_NbImgOk, ushor
   float aSV = 0.0f, aSVV = 0.0f;
   short2 pt;
 
-  #pragma unroll // ATTENTION PRAGMA FAIT AUGMENTER LA quantité MEMOIRE des registres!!!
+  #pragma unroll // ATTENTION PRAGMA FAIT AUGMENTER LA quantitï¿½ MEMOIRE des registres!!!
   for (pt.y = c0.y ; pt.y <= c1.y; pt.y++)
   {
 
@@ -144,7 +147,7 @@ template<int TexSel> __global__ void correlationKernel( uint *dev_NbImgOk, ushor
       {
           const float val = cImg[pt.x];     // Valeur de l'image
           aSV  += val;                      // Somme des valeurs de l'image cte
-          aSVV += (val*val);                // Somme des carrés des vals image cte
+          aSVV += (val*val);                // Somme des carrï¿½s des vals image cte
       }
   }
 
@@ -186,7 +189,7 @@ __global__ void getValueImagesKernel(  ushort2 *ClassEqui, float* cuValImage, ui
 {
     extern __shared__ float cacheImg[];
 
-    // Coordonnées du terrain global avec bordure // __umul24!!!! A voir
+    // Coordonnï¿½es du terrain global avec bordure // __umul24!!!! A voir
 
     const uint2 ptHTer = make_uint2(blockIdx) * nbActThrd + make_uint2(threadIdx);
 
@@ -296,111 +299,109 @@ extern "C" void	 LaunchKernelCorrelation(const int s,cudaStream_t stream,pCorGpu
 
 
 
-/// \brief Kernel Calcul "rapide"  de la multi-correlation en utilisant la formule de Huygens n utilisant pas des fonctions atomiques
+/// \brief Multi-correlation via Huygens (atomics on vignette reduction).
+///
+/// Barrier contract (CUDA): every live thread in the block must execute the same
+/// sequence of __syncthreads(). The stock kernel deadlocked because:
+///   1) edge threads early-returned on oSE(ptCach) before the first barrier
+///   2) threads with nImgOK <= 1 skipped the per-class barrier inside the loop
+/// This rewrite uses predicates (inBounds / doClass / mainThread) so work is
+/// masked but barriers stay uniform. Huygens math is unchanged (max-perf path).
 
 template<ushort SIZE3VIGN > __global__ void multiCorrelationKernel(ushort2* classEqui,float *dTCost, float* cacheVign, uint* dev_NbImgOk, /*uint2 nbActThr,*/HDParamCorrel HdPc)
 {
 
   __shared__ float aSV [ SIZE3VIGN   ][ SIZE3VIGN ];          // Somme des valeurs
-  __shared__ float aSVV[ SIZE3VIGN   ][ SIZE3VIGN ];         // Somme des carrés des valeurs
+  __shared__ float aSVV[ SIZE3VIGN   ][ SIZE3VIGN ];         // Somme des carrï¿½s des valeurs
   __shared__ float resu[ SIZE3VIGN>>1 ][ SIZE3VIGN>>1 ];		// resultat
 
   __shared__ float cResu[ SIZE3VIGN>>1][ SIZE3VIGN>>1 ];		// resultat
   __shared__ uint nbIm[ SIZE3VIGN>>1][ SIZE3VIGN>>1 ];		// nombre d'images correcte
 
-  // coordonnées des threads // TODO uint2 to ushort2
+  // coordonnï¿½es des threads // TODO uint2 to ushort2
   const uint2 t  = make_uint2(threadIdx);
-  //const uint2 mt = make_uint2(t.x/2,t.y/2);
 
-  // TODO : 2014 LE NOMBRE DE TREAD ACTIF peut etre nettement ameliorer par un template
-  //if ( oSE( t, nbActThr))	return; // si le thread est inactif, il sort
-
-  // Coordonnées 2D du cache vignette
+  // Coordonnï¿½es 2D du cache vignette
   const uint2 ptCach = make_uint2(blockIdx) * SIZE3VIGN + t;
 
-  // Si le thread est en dehors du cache // TODO 2014 à verifier ----
-  if ( oSE(ptCach, HdPc.dimCach))	return;
+  // Edge threads stay alive for barriers; they just skip memory work.
+  const bool inBounds = !oSE(ptCach, HdPc.dimCach);
 
-  const uint2	ptTer	= ptCach / invPc.dimVig; // Coordonnées 2D du terrain
+  // thTer is always valid from threadIdx (block is SIZE3VIGN x SIZE3VIGN).
+  const uint2 thTer = t / invPc.dimVig;
+  const bool mainThread = aEq(t - thTer * invPc.dimVig, 0);
 
-  // if(!tex2D(TexS_MaskGlobal, ptTer.x + HdPc.rTer.pt0.x , ptTer.y + HdPc.rTer.pt0.y)) return;// COM 6 mars 2014// TODO 2014 à verifier notamment quand il n'y a pas de cache!!!
+  uint2 ptTer = make_uint2(0, 0);
+  uint  ter   = 0;
+  uint  iTer  = 0;
+  if (inBounds)
+  {
+      ptTer = ptCach / invPc.dimVig;
+      ter   = to1D(ptTer, HdPc.dimTer);
+      iTer  = blockIdx.z * HdPc.sizeTer + ter;
+  }
 
-  const uint    ter     = to1D(ptTer, HdPc.dimTer);            // Coordonnées 1D du terrain
-
-  const uint	iTer	= blockIdx.z * HdPc.sizeTer + ter;     // Coordonnées 1D du terrain avec prise en compte des differents Z
-
-  const uint2   thTer	= t / invPc.dimVig;                    // Coordonnées 2D du terrain dans le repere des threads
-
-  const bool mainThread = aEq(t - thTer*invPc.dimVig,0);
-
-  //if (!aEq(t - thTer*invPc.dimVig,0))
-  //{
-      resu[thTer.y][thTer.x]    = 0.0f;
-      nbIm[thTer.y][thTer.x]    = 0;
-  //}
+  // Multiple threads share thTer; redundant zero is intentional (same as stock).
+  resu[thTer.y][thTer.x] = 0.0f;
+  nbIm[thTer.y][thTer.x] = 0;
 
   __syncthreads();
 
   for (ushort iCla = 0; iCla < invPc.nbClass; ++iCla)
   {
+      ushort nImgOK = 0;
+      bool   doClass = false;
 
-      const uint icTer    = (blockIdx.z* invPc.nbClass + iCla ) * HdPc.sizeTer + ter;
-
-      const ushort nImgOK = (ushort)dev_NbImgOk[icTer];
-
-      if ( nImgOK > 1)
+      if (inBounds)
       {
-		  aSV [t.y][t.x]    = 0.0f;
-		  aSVV[t.y][t.x]    = 0.0f;
-		  cResu[thTer.y][thTer.x]	= 0.0f;
-
-          const uint pitCla         = ((uint)classEqui[iCla].y) * HdPc.sizeCach;
-
-          const uint pitLayerCache  = blockIdx.z  * HdPc.sizeCachAll + pitCla + to1D( ptCach, HdPc.dimCach );	// Taille du cache vignette pour une image
-
-		  const float* caVi = cacheVign + pitLayerCache;
-
-		  const uint limOK = nImgOK * HdPc.sizeCach;
-
- #pragma unroll
-		  for(uint i =  0 ;i< limOK ;i+=HdPc.sizeCach)
-          {
-              const float val  = caVi[i];
-              aSV[t.y][t.x]   += val;
-              aSVV[t.y][t.x]  += val * val;
-          }
-
-          //__syncthreads();
-
-          //atomicAdd(&(resu[thTer.y][thTer.x]),(aSVV[t.y][t.x] - fdividef(aSV[t.y][t.x] * aSV[t.y][t.x],(float)nImgOK)) * (nImgOK - 1));
-
-		  atomicAdd(&(cResu[thTer.y][thTer.x]),(aSVV[t.y][t.x] - fdividef(aSV[t.y][t.x] * aSV[t.y][t.x],(float)nImgOK)));
-
-          __syncthreads();
-
-          if (mainThread)
-          {
-			  resu[thTer.y][thTer.x] += (float)(1.0f - max (-1.0, min(1.0f,1.0f - fdividef( cResu[thTer.y][thTer.x], ((float)(nImgOK - 1))* (invPc.sizeVig))))) * nImgOK;
-              nbIm[thTer.y][thTer.x] += nImgOK;
-          }
+          const uint icTer = (blockIdx.z * invPc.nbClass + iCla) * HdPc.sizeTer + ter;
+          nImgOK  = (ushort)dev_NbImgOk[icTer];
+          doClass = (nImgOK > 1);
       }
+
+      if (doClass)
+      {
+          aSV [t.y][t.x] = 0.0f;
+          aSVV[t.y][t.x] = 0.0f;
+          cResu[thTer.y][thTer.x] = 0.0f;
+
+          const uint pitCla        = ((uint)classEqui[iCla].y) * HdPc.sizeCach;
+          const uint pitLayerCache = blockIdx.z * HdPc.sizeCachAll + pitCla + to1D(ptCach, HdPc.dimCach);
+          const float* caVi        = cacheVign + pitLayerCache;
+          const uint limOK         = nImgOK * HdPc.sizeCach;
+
+#pragma unroll
+          for (uint i = 0; i < limOK; i += HdPc.sizeCach)
+          {
+              const float val = caVi[i];
+              aSV[t.y][t.x]  += val;
+              aSVV[t.y][t.x] += val * val;
+          }
+
+          atomicAdd(&(cResu[thTer.y][thTer.x]),
+                    (aSVV[t.y][t.x] - fdividef(aSV[t.y][t.x] * aSV[t.y][t.x], (float)nImgOK)));
+      }
+
+      // Uniform barrier: every class iteration, every thread (doClass or not).
+      __syncthreads();
+
+      if (doClass && mainThread)
+      {
+          resu[thTer.y][thTer.x] +=
+              (float)(1.0f - max(-1.0, min(1.0f, 1.0f - fdividef(cResu[thTer.y][thTer.x],
+                                                                   ((float)(nImgOK - 1)) * (invPc.sizeVig))))) *
+              nImgOK;
+          nbIm[thTer.y][thTer.x] += nImgOK;
+      }
+
+      // Protect cResu zeroing on the next class against a racing mainThread read.
+      __syncthreads();
   }
 
-  __syncthreads();
-  if( (nbIm[thTer.y][thTer.x] == 0) || (!mainThread) ) return;
-
-  //__syncthreads();
-
-  // Normalisation pour le ramener a un equivalent de 1-Correl
-  //const float cost =  fdividef( resu[thTer.y][thTer.x], ((float)nImgOK -1.0f) * (invPc.sizeVig));
-
-  //const float cost =  fdividef( resu[thTer.y][thTer.x], ((float)nbIm[thTer.y][thTer.x])* (invPc.sizeVig));
-
-  //const float cost =  fdividef( resu[thTer.y][thTer.x], ((float)nbIm[thTer.y][thTer.x] -1)* (invPc.sizeVig));
-
-  //dTCost[iTer] = 1.0f - max (-1.0, min(1.0f,1.0f - cost));
-
-  dTCost[iTer] = fdividef(resu[thTer.y][thTer.x],(float)nbIm[thTer.y][thTer.x]);
+  if (inBounds && mainThread && (nbIm[thTer.y][thTer.x] != 0))
+  {
+      dTCost[iTer] = fdividef(resu[thTer.y][thTer.x], (float)nbIm[thTer.y][thTer.x]);
+  }
 
 }
 
@@ -419,9 +420,19 @@ template<ushort SIZE3VIGN > void LaunchKernelMultiCor(cudaStream_t stream, pCorG
 /// \brief Fonction qui lance les kernels de multi-Correlation n'utilisant pas des fonctions atomiques
 extern "C" void LaunchKernelMultiCorrelation(cudaStream_t stream, pCorGpu &param, SData2Correl &dataCorrel)
 {
-    if(param.invPC.rayVig.x == 1 || param.invPC.rayVig.x == 2 )
+    const ushort ray = param.invPC.rayVig.x;
+    if (ray == 1 || ray == 2)
         LaunchKernelMultiCor<SBLOCKDIM>(stream, param, dataCorrel);
-    else if(param.invPC.rayVig.x == 3 )
+    else if (ray == 3)
         LaunchKernelMultiCor<7*2>(stream, param, dataCorrel);
-
+    else
+    {
+        // Stock silently no-oped unsupported rayVig â€” that looks like a hang downstream.
+        fprintf(stderr,
+                "[GPGPU][RUNPOD_GPGPU_DIAG] ERROR LaunchKernelMultiCorrelation: unsupported rayVig=%u "
+                "(supported 1,2,3). Aborting instead of silent no-op.\n",
+                (unsigned)ray);
+        fflush(stderr);
+        abort();
+    }
 }
