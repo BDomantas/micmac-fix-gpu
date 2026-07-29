@@ -5,6 +5,7 @@
 #include <unistd.h> // RUNPOD_GPGPU_DIAG
 
 #include "GpGpu/GpGpu_Data.h"
+#include "GpGpu/GpGpu_Diag.h"
 
 #ifdef CPP11THREAD_NOBOOSTTHREAD
 #define CPP11_THREAD
@@ -318,8 +319,7 @@ void CSimpleJobCpuGpu<T>::simpleCompute()
         boost::this_thread::sleep(boost::posix_time::microsec(us));
 #endif
     };
-    fprintf(stderr, "[GPGPU][%s] simpleCompute ENTER pid=%d\n", "RUNPOD_GPGPU_DIAG", (int)getpid());
-    fflush(stderr);
+    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] simpleCompute ENTER pid=%d\n", (int)getpid());
 
     double t0 = _gpgpu_now();
     double t_last = t0;
@@ -329,34 +329,31 @@ void CSimpleJobCpuGpu<T>::simpleCompute()
         wait_iters++;
         _gpgpu_sleep_us(200);
         double t = _gpgpu_now();
-        if (t - t_last >= 2.0)
+        // Heartbeats only in FULL; long-stall WARNING at MIN (or FULL).
+        if (GpgpuDiagFull() && (t - t_last >= 2.0))
         {
-            fprintf(stderr,
-                "[GPGPU][%s] simpleCompute WAIT_COMPUTE pid=%d elapsed=%.1fs iters=%lu "
+            GPGPU_DIAG_FULL(
+                "[GPGPU][RUNPOD_GPGPU_DIAG] simpleCompute WAIT_COMPUTE pid=%d elapsed=%.1fs iters=%lu "
                 "compute=%d copy=%d pre=%d idBuf=%d\n",
-                "RUNPOD_GPGPU_DIAG", (int)getpid(), t - t0, wait_iters,
+                (int)getpid(), t - t0, wait_iters,
                 (int)GetCompute(), (int)GetDataToCopy(), (int)GetPreComp(), (int)GetIdBuf());
-            fflush(stderr);
             t_last = t;
         }
         if (t - t0 > 600.0 && wait_iters % 5000 == 0)
         {
-            fprintf(stderr,
-                "[GPGPU][%s] WARNING simpleCompute still WAIT_COMPUTE after %.0fs pid=%d\n",
-                "RUNPOD_GPGPU_DIAG", t - t0, (int)getpid());
-            fflush(stderr);
+            GPGPU_DIAG_MIN(
+                "[GPGPU][RUNPOD_GPGPU_DIAG] WARNING simpleCompute still WAIT_COMPUTE after %.0fs pid=%d\n",
+                t - t0, (int)getpid());
         }
     }
     SetCompute(false);
 
-    fprintf(stderr, "[GPGPU][%s] simpleCompute WORK_BEGIN pid=%d wait_compute=%.2fs\n",
-            "RUNPOD_GPGPU_DIAG", (int)getpid(), _gpgpu_now() - t0);
-    fflush(stderr);
+    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] simpleCompute WORK_BEGIN pid=%d wait_compute=%.2fs\n",
+            (int)getpid(), _gpgpu_now() - t0);
     double t_work0 = _gpgpu_now();
     simpleWork();
-    fprintf(stderr, "[GPGPU][%s] simpleCompute WORK_END pid=%d work=%.2fs\n",
-            "RUNPOD_GPGPU_DIAG", (int)getpid(), _gpgpu_now() - t_work0);
-    fflush(stderr);
+    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] simpleCompute WORK_END pid=%d work=%.2fs\n",
+            (int)getpid(), _gpgpu_now() - t_work0);
 
     t0 = _gpgpu_now();
     t_last = t0;
@@ -367,47 +364,42 @@ void CSimpleJobCpuGpu<T>::simpleCompute()
         wait_iters++;
         _gpgpu_sleep_us(200);
         double t = _gpgpu_now();
-        if (t - t_last >= 2.0)
+        if (GpgpuDiagFull() && (t - t_last >= 2.0))
         {
-            fprintf(stderr,
-                "[GPGPU][%s] simpleCompute WAIT_COPY_CLEAR pid=%d elapsed=%.1fs iters=%lu "
+            GPGPU_DIAG_FULL(
+                "[GPGPU][RUNPOD_GPGPU_DIAG] simpleCompute WAIT_COPY_CLEAR pid=%d elapsed=%.1fs iters=%lu "
                 "compute=%d copy=%d pre=%d idBuf=%d\n",
-                "RUNPOD_GPGPU_DIAG", (int)getpid(), t - t0, wait_iters,
+                (int)getpid(), t - t0, wait_iters,
                 (int)GetCompute(), (int)GetDataToCopy(), (int)GetPreComp(), (int)GetIdBuf());
-            fflush(stderr);
             t_last = t;
         }
         if (t - t0 > 600.0 && wait_iters % 5000 == 0)
         {
-            fprintf(stderr,
-                "[GPGPU][%s] WARNING simpleCompute WAIT_COPY_CLEAR >600s (possible host stall) pid=%d\n",
-                "RUNPOD_GPGPU_DIAG", (int)getpid());
-            fflush(stderr);
+            GPGPU_DIAG_MIN(
+                "[GPGPU][RUNPOD_GPGPU_DIAG] WARNING simpleCompute WAIT_COPY_CLEAR >600s (possible host stall) pid=%d\n",
+                t - t0, (int)getpid());
         }
     }
 
     SwitchIdBuffer();
     SetDataToCopy(true);
     SetCompute(true);
-    fprintf(stderr, "[GPGPU][%s] simpleCompute EXIT pid=%d total=%.2fs idBuf=%d\n",
-            "RUNPOD_GPGPU_DIAG", (int)getpid(), _gpgpu_now() - t_work0, (int)GetIdBuf());
-    fflush(stderr);
+    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] simpleCompute EXIT pid=%d total=%.2fs idBuf=%d\n",
+            (int)getpid(), _gpgpu_now() - t_work0, (int)GetIdBuf());
 }
 
 template< class T >
 void CSimpleJobCpuGpu<T>::simpleJob()
 {
-    fprintf(stderr, "[GPGPU][%s] simpleJob SPAWN pid=%d compute=%d copy=%d pre=%d idBuf=%d\n",
-            "RUNPOD_GPGPU_DIAG", (int)getpid(),
+    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] simpleJob SPAWN pid=%d compute=%d copy=%d pre=%d idBuf=%d\n",
+            (int)getpid(),
             (int)GetCompute(), (int)GetDataToCopy(), (int)GetPreComp(), (int)GetIdBuf());
-    fflush(stderr);
 #ifdef CPP11_THREAD
     #ifdef NOCUDA_X11
         std::thread tOpti(&CSimpleJobCpuGpu<T>::simpleCompute,this);
         tOpti.detach();
     #else
-        fprintf(stderr, "[GPGPU][%s] ERROR simpleJob: CPP11_THREAD without NOCUDA_X11 — NO WORKER THREAD\n", "RUNPOD_GPGPU_DIAG");
-        fflush(stderr);
+        GPGPU_DIAG_ERR("[GPGPU][RUNPOD_GPGPU_DIAG] ERROR simpleJob: CPP11_THREAD without NOCUDA_X11 — NO WORKER THREAD\n");
     #endif
 #else
         boost::thread tOpti(&CSimpleJobCpuGpu<T>::simpleCompute,this);

@@ -1,6 +1,7 @@
 #include <stdio.h> // RUNPOD_GPGPU_DIAG
 #include <cuda_runtime.h> // RUNPOD_GPGPU_DIAG
 #include "GpGpu/GpGpu_InterOptimisation.h"
+#include "GpGpu/GpGpu_Diag.h"
 
 InterfOptimizGpGpu::InterfOptimizGpGpu()
 {
@@ -49,10 +50,8 @@ void InterfOptimizGpGpu::Prepare(uint x, uint y, ushort penteMax, ushort NBDir,f
 
 void InterfOptimizGpGpu::optimisation()
 {
-    // RUNPOD_GPGPU_DIAG
-    fprintf(stderr, "[GPGPU][%s] optimisation ENTER idBuf=%d nbLines=%u\n",
-            "RUNPOD_GPGPU_DIAG", (int)GetIdBuf(), (unsigned)_H_data2Opt.nbLines());
-    fflush(stderr);
+    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] optimisation ENTER idBuf=%d nbLines=%u\n",
+            (int)GetIdBuf(), (unsigned)_H_data2Opt.nbLines());
 
     _D_data2Opt.SetNbLine(_H_data2Opt.nbLines());
 
@@ -62,32 +61,26 @@ void InterfOptimizGpGpu::optimisation()
 
     _D_data2Opt.ReallocIf(_H_data2Opt);
 
-    fprintf(stderr, "[GPGPU][%s] optimisation CopyHostToDevice BEGIN\n", "RUNPOD_GPGPU_DIAG");
-    fflush(stderr);
+    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] optimisation CopyHostToDevice BEGIN\n");
     _D_data2Opt.CopyHostToDevice(_H_data2Opt,GetIdBuf());
-    fprintf(stderr, "[GPGPU][%s] optimisation CopyHostToDevice END\n", "RUNPOD_GPGPU_DIAG");
-    fflush(stderr);
+    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] optimisation CopyHostToDevice END\n");
 
     SetPreComp(true);
 
-    fprintf(stderr, "[GPGPU][%s] optimisation Gpu_OptimisationOneDirection BEGIN\n", "RUNPOD_GPGPU_DIAG");
-    fflush(stderr);
+    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] optimisation Gpu_OptimisationOneDirection BEGIN\n");
     Gpu_OptimisationOneDirection(_D_data2Opt);
     {
         cudaError_t err = cudaDeviceSynchronize();
         if (err != cudaSuccess)
-            fprintf(stderr, "[GPGPU][%s] ERROR after Gpu_OptimisationOneDirection: %s\n",
-                    "RUNPOD_GPGPU_DIAG", cudaGetErrorString(err));
+            GPGPU_DIAG_ERR("[GPGPU][RUNPOD_GPGPU_DIAG] ERROR after Gpu_OptimisationOneDirection: %s\n",
+                    cudaGetErrorString(err));
         else
-            fprintf(stderr, "[GPGPU][%s] optimisation Gpu_OptimisationOneDirection END (sync ok)\n", "RUNPOD_GPGPU_DIAG");
-        fflush(stderr);
+            GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] optimisation Gpu_OptimisationOneDirection END (sync ok)\n");
     }
 
-    fprintf(stderr, "[GPGPU][%s] optimisation CopyDevicetoHost BEGIN\n", "RUNPOD_GPGPU_DIAG");
-    fflush(stderr);
+    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] optimisation CopyDevicetoHost BEGIN\n");
     _D_data2Opt.CopyDevicetoHost(_H_data2Opt,GetIdBuf());
-    fprintf(stderr, "[GPGPU][%s] optimisation EXIT\n", "RUNPOD_GPGPU_DIAG");
-    fflush(stderr);
+    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] optimisation EXIT\n");
 }
 
 void InterfOptimizGpGpu::simpleWork()

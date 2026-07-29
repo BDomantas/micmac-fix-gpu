@@ -1,4 +1,5 @@
 #include <stdio.h> // RUNPOD_GPGPU_DIAG
+#include "GpGpu/GpGpu_Diag.h"
 #include <time.h> // RUNPOD_GPGPU_DIAG
 /*Header-MicMac-eLiSe-25/06/2007
 
@@ -701,8 +702,7 @@ void cGBV2_ProgDynOptimiseur::SolveAllDirectionGpu(int aNbDir)
 	IGpuOpt.SetCompute(true);
 
     // RUNPOD_GPGPU_DIAG
-fprintf(stderr, "[GPGPU][%s] SolveAllDirectionGpu ENTER aNbDir=%d Sz=(%d,%d)\n", "RUNPOD_GPGPU_DIAG", aNbDir, mSz.x, mSz.y);
-fflush(stderr);
+GPGPU_DIAG_MIN("[GPGPU][RUNPOD_GPGPU_DIAG] SolveAllDirectionGpu ENTER aNbDir=%d Sz=(%d,%d)\n", aNbDir, mSz.x, mSz.y);
 unsigned long _opt_idle = 0;
 while (aKDir < aNbDir)
     {
@@ -757,8 +757,7 @@ while (aKDir < aNbDir)
 
             //IGpuOpt.SetCompute(true);
             IGpuOpt.SetPreComp(false);
-            fprintf(stderr, "[GPGPU][%s] Optim PREP dirPre=%d/%d\n", "RUNPOD_GPGPU_DIAG", aKPreDir, aNbDir);
-            fflush(stderr);
+            GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] Optim PREP dirPre=%d/%d\n", aKPreDir, aNbDir);
             IGpuOpt.simpleJob();
             _opt_did = true;
 
@@ -773,8 +772,7 @@ while (aKDir < aNbDir)
 //				copyCells_Stream2Mat<true>(direction(aNbDir,aKDir),IGpuOpt.HData2Opt(),IGpuOpt._poInitCost,IGpuOpt._preFinalCost1D,IGpuOpt._FinalDefCor,!IGpuOpt.GetIdBuf());
 //			else
 				copyCells_Stream2Mat<false>(direction(aNbDir,aKDir),IGpuOpt.HData2Opt(),IGpuOpt._poInitCost,IGpuOpt._preFinalCost1D,IGpuOpt._FinalDefCor,!IGpuOpt.GetIdBuf());
-			fprintf(stderr, "[GPGPU][%s] Optim COPY dir=%d/%d\n", "RUNPOD_GPGPU_DIAG", aKDir, aNbDir);
-fflush(stderr);
+			GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] Optim COPY dir=%d/%d\n", aKDir, aNbDir);
 IGpuOpt.SetDataToCopy(false);
 			aKDir++;
 _opt_did = true;
@@ -787,19 +785,17 @@ _opt_did = true;
 #endif
             if ((_opt_idle % 1000) == 0)
             {
-                fprintf(stderr,
-                    "[GPGPU][%s] Optim HOST_IDLE dir=%d/%d pre=%d compute=%d copy=%d preFlag=%d idle=%lu\n",
-                    "RUNPOD_GPGPU_DIAG", aKDir, aNbDir, aKPreDir,
+                GPGPU_DIAG_FULL(
+                    "[GPGPU][RUNPOD_GPGPU_DIAG] Optim HOST_IDLE dir=%d/%d pre=%d compute=%d copy=%d preFlag=%d idle=%lu\n",
+                    aKDir, aNbDir, aKPreDir,
                     (int)IGpuOpt.GetCompute(), (int)IGpuOpt.GetDataToCopy(), (int)IGpuOpt.GetPreComp(),
                     _opt_idle);
-                fflush(stderr);
             }
         }
 
     }
 
-    fprintf(stderr, "[GPGPU][%s] SolveAllDirectionGpu EXIT dirs_done=%d\n", "RUNPOD_GPGPU_DIAG", aKDir);
-    fflush(stderr);
+    GPGPU_DIAG_MIN("[GPGPU][RUNPOD_GPGPU_DIAG] SolveAllDirectionGpu EXIT dirs_done=%d\n", aKDir);
     IGpuOpt.freezeCompute();
 
 }

@@ -5,6 +5,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include "GpGpu/GpGpu_Diag.h"
 
 /// \file       GpGpuCudaCorrelation.cu
 /// \brief      Kernel
@@ -428,11 +429,10 @@ extern "C" void LaunchKernelMultiCorrelation(cudaStream_t stream, pCorGpu &param
     else
     {
         // Stock silently no-oped unsupported rayVig — that looks like a hang downstream.
-        fprintf(stderr,
+        GPGPU_DIAG_ERR(
                 "[GPGPU][RUNPOD_GPGPU_DIAG] ERROR LaunchKernelMultiCorrelation: unsupported rayVig=%u "
                 "(supported 1,2,3). Aborting instead of silent no-op.\n",
                 (unsigned)ray);
-        fflush(stderr);
         abort();
     }
 }

@@ -1,4 +1,5 @@
 #include <stdio.h> // RUNPOD_GPGPU_DIAG
+#include "GpGpu/GpGpu_Diag.h"
 /*Header-MicMac-eLiSe-25/06/2007
 
     MicMac : Multi Image Correspondances par Methodes Automatiques de Correlation
@@ -816,8 +817,7 @@ void cAppliMICMAC::DoOneBloc
                (mCMS!=0 && mCMS->UseGpGpu().Val()))
             {
                 mCout << "       Cuda Correlation Finished, Begin Cuda Optimisation\n";
-                fprintf(stderr, "[GPGPU][RUNPOD_GPGPU_DIAG] STAGE Cuda Correlation Finished, Begin Cuda Optimisation\n");
-                fflush(stderr); // RUNPOD_GPGPU_DIAG
+                GPGPU_DIAG_MIN("[GPGPU][RUNPOD_GPGPU_DIAG] STAGE Cuda Correlation Finished, Begin Cuda Optimisation\n");
             }
             else
             {
@@ -825,11 +825,9 @@ void cAppliMICMAC::DoOneBloc
             }
         }
 
-        fprintf(stderr, "[GPGPU][RUNPOD_GPGPU_DIAG] STAGE mSurfOpt->SolveOpt() BEGIN\n");
-        fflush(stderr);
+        GPGPU_DIAG_MIN("[GPGPU][RUNPOD_GPGPU_DIAG] STAGE mSurfOpt->SolveOpt() BEGIN\n");
         mSurfOpt->SolveOpt();
-        fprintf(stderr, "[GPGPU][RUNPOD_GPGPU_DIAG] STAGE mSurfOpt->SolveOpt() END\n");
-        fflush(stderr);
+        GPGPU_DIAG_MIN("[GPGPU][RUNPOD_GPGPU_DIAG] STAGE mSurfOpt->SolveOpt() END\n");
 
 #if CUDA_ENABLED
         if (mCorrelAdHoc && mCorrelAdHoc->GPU_CorrelBasik().IsInit())

@@ -1,4 +1,5 @@
 #include <stdio.h> // RUNPOD_GPGPU_DIAG
+#include "GpGpu/GpGpu_Diag.h"
 #include <time.h> // RUNPOD_GPGPU_DIAG
 /*Header-MicMac-eLiSe-25/06/2007
 
@@ -1995,8 +1996,7 @@ void cAppliMICMAC::DoGPU_Correl
 			int aKCellZ      = 0;
 			int aKPreCellZ   = 0;
 // RUNPOD_GPGPU_DIAG
-fprintf(stderr, "[GPGPU][%s] DoGPU_Correl_Basik MT ENTER nbCellZ=%d Z=[%d,%d] interZ=%u\n", "RUNPOD_GPGPU_DIAG", nbCellZ, mZMinGlob, mZMaxGlob, interZ);
-fflush(stderr);
+GPGPU_DIAG_MIN("[GPGPU][RUNPOD_GPGPU_DIAG] DoGPU_Correl_Basik MT ENTER nbCellZ=%d Z=[%d,%d] interZ=%u\n", nbCellZ, mZMinGlob, mZMaxGlob, interZ);
 unsigned long _gpgpu_idle = 0;
 			while( aKCellZ < nbCellZ )
             {
@@ -2020,8 +2020,7 @@ unsigned long _gpgpu_idle = 0;
 
                     //IMmGg.signalComputeCorrel(Mask.Dz);
                     IMmGg.SetPreComp(false);
-                    fprintf(stderr, "[GPGPU][%s] Correl PREP cellPre=%d/%d Zproj=%d\n", "RUNPOD_GPGPU_DIAG", aKPreCellZ, nbCellZ, anZProjection);
-                    fflush(stderr);
+                    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] Correl PREP cellPre=%d/%d Zproj=%d\n", aKPreCellZ, nbCellZ, anZProjection);
                     IMmGg.simpleJob();
                     _did = true;                    
 
@@ -2034,8 +2033,8 @@ unsigned long _gpgpu_idle = 0;
                 if (IMmGg.GetDataToCopy())
                 {
                     uint ZtoCopy = IMmGg.Param(!IMmGg.GetIdBuf()).ZCInter;
-                    fprintf(stderr, "[GPGPU][%s] Correl COPY cell=%d/%d ZtoCopy=%u Zcomp=%d\n",
-                            "RUNPOD_GPGPU_DIAG", aKCellZ, nbCellZ, ZtoCopy, anZComputed);
+                    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] Correl COPY cell=%d/%d ZtoCopy=%u Zcomp=%d\n",
+                            aKCellZ, nbCellZ, ZtoCopy, anZComputed);
                     fflush(stderr);
                     setVolumeCost(anZComputed,anZComputed + ZtoCopy,!IMmGg.GetIdBuf());
                     IMmGg.SetDataToCopy(false);
@@ -2051,12 +2050,11 @@ unsigned long _gpgpu_idle = 0;
 #endif
                     if ((_gpgpu_idle % 1000) == 0)
                     {
-                        fprintf(stderr,
-                            "[GPGPU][%s] Correl HOST_IDLE cell=%d/%d pre=%d compute=%d copy=%d preFlag=%d idle=%lu\n",
-                            "RUNPOD_GPGPU_DIAG", aKCellZ, nbCellZ, aKPreCellZ,
+                        GPGPU_DIAG_FULL(
+                            "[GPGPU][RUNPOD_GPGPU_DIAG] Correl HOST_IDLE cell=%d/%d pre=%d compute=%d copy=%d preFlag=%d idle=%lu\n",
+                            aKCellZ, nbCellZ, aKPreCellZ,
                             (int)IMmGg.GetCompute(), (int)IMmGg.GetDataToCopy(), (int)IMmGg.GetPreComp(),
                             _gpgpu_idle);
-                        fflush(stderr);
                     }
                 }
 
@@ -2084,7 +2082,7 @@ unsigned long _gpgpu_idle = 0;
             }
         }
 
-        fprintf(stderr, "[GPGPU][%s] DoGPU_Correl_Basik DONE\n", "RUNPOD_GPGPU_DIAG"); fflush(stderr);
+        GPGPU_DIAG_MIN("[GPGPU][RUNPOD_GPGPU_DIAG] DoGPU_Correl_Basik DONE\n");
         IMmGg.freezeCompute();
 
 //        IMmGg.Data().DeallocDeviceData();
