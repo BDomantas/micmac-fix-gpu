@@ -29,6 +29,27 @@ void GpGpuInterfaceCorrel::ReallocHostData(uint interZ,ushort idBuff)
     _data2Cor.ReallocHostData(interZ,_param[idBuff],idBuff);
 }
 
+SData2Correl& GpGpuInterfaceCorrel::Data()
+{
+    return _data2Cor;
+}
+
+float* GpGpuInterfaceCorrel::VolumeCost(ushort id)
+{
+    return _data2Cor.HostVolumeCost(id);
+}
+
+void GpGpuInterfaceCorrel::IntervalZ(uint &interZ, int anZProjection, int aZMaxTer)
+{
+    // Keep correl slab within remaining Z and INTERZ cap.
+    int remain = aZMaxTer - anZProjection;
+    if (remain < 0)
+        remain = 0;
+    interZ = (uint)min(INTERZ, remain > 0 ? remain : (int)INTERZ);
+    if (interZ < 1)
+        interZ = 1;
+}
+
 uint2 &GpGpuInterfaceCorrel::DimTerrainGlob()
 {
     return _m_DimTerrainGlob;
