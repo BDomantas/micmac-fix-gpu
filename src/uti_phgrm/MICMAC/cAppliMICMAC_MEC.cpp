@@ -497,6 +497,7 @@ std::cout << "CCMMM = " << aBoxClip._p0 << " " << aBoxClip._p1 << "\n"; getchar(
 #endif
          ;
 
+#if CUDA_ENABLED
      if (aInProcessGpu)
      {
         mCout << " [GPU_PIPELINE] GPU_STAGE etape DeZoom=" << anEtape.DeZoomTer()
@@ -523,6 +524,7 @@ std::cout << "CCMMM = " << aBoxClip._p0 << " " << aBoxClip._p1 << "\n"; getchar(
             }
         }
      }
+#endif
 
      bool aDidProbeBox = false;
      int  aAutoN = aUserByP;
@@ -596,6 +598,7 @@ std::cout << "CCMMM = " << aBoxClip._p0 << " " << aBoxClip._p1 << "\n"; getchar(
                }
           }
      }
+#if CUDA_ENABLED
      if (aInProcessGpu)
      {
         GPGPU_DIAG_MIN(
@@ -603,6 +606,7 @@ std::cout << "CCMMM = " << aBoxClip._p0 << " " << aBoxClip._p1 << "\n"; getchar(
             "expect_mec_gpu_procs=1 pid=%d\n",
             aBoxesInProcess, aLStrProcess.size(), gpgpu_pipeline::SelfPid());
      }
+#endif
      // Process fan-out only when not in pipeline in-process mode.
      if ((! aInProcessGpu) && ByProcess().Val()!=0 && (! aLStrProcess.empty()))
      {
