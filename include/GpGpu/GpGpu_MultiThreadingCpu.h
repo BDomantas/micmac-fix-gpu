@@ -376,7 +376,7 @@ void CSimpleJobCpuGpu<T>::simpleCompute()
         if (t - t0 > 600.0 && wait_iters % 5000 == 0)
         {
             GPGPU_DIAG_MIN(
-                "[GPGPU][RUNPOD_GPGPU_DIAG] WARNING simpleCompute WAIT_COPY_CLEAR >600s (possible host stall) pid=%d\n",
+                "[GPGPU][RUNPOD_GPGPU_DIAG] WARNING simpleCompute WAIT_COPY_CLEAR after %.0fs (possible host stall) pid=%d\n",
                 t - t0, (int)getpid());
         }
     }
