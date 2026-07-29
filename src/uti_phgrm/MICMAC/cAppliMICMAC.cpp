@@ -2070,14 +2070,14 @@ cModeleAnalytiqueComp &  cAppliMICMAC::LastMAnExp()
 
 
 
-void cAppliMICMAC::ExeProcessParallelisable
+bool cAppliMICMAC::ExeProcessParallelisable
      (
           bool AddNameExeMicMac,
           const  std::list<std::string> & aLProc
      )
 {
    if (aLProc.empty())
-      return;
+      return true;
 
    // Modification pour la gestion des espaces dans les nom de repertoire (GM)
    // Remodifie pour fonctionnement sous windows (DB)
@@ -2127,9 +2127,14 @@ void cAppliMICMAC::ExeProcessParallelisable
            std::string commande = ToAdd  + " "+ (*itStr);
          mCout << " ---Launch Process="<<commande<< "\n";  
 	int aCodeRetour = system_call(commande.c_str());
-         if (StopOnEchecFils().Val())
+         if (aCodeRetour != 0)
          {
-             ELISE_ASSERT(aCodeRetour==0,"Error in child process");
+             if (StopOnEchecFils().Val())
+             {
+                 ELISE_ASSERT(aCodeRetour==0,"Error in child process");
+             }
+             mCout << " ---End Process (FAILED code=" << aCodeRetour << ")\n";
+             return false;
          }
          mCout << " ---End Process\n";
 
@@ -2151,7 +2156,7 @@ void cAppliMICMAC::ExeProcessParallelisable
        	    VoidSystem(commande_avancement.c_str());
 	 }
 	}
-       return;
+       return true;
   }
   // Version parallelisation avec makefile
   // la valeur absolue donne le nombre de job en parallele dans le Makefile (option -j)
@@ -2240,11 +2245,19 @@ void cAppliMICMAC::ExeProcessParallelisable
        bool makeSucceeded = launchMake( nomMakefile, "", thread_count );
        //// END MODIFIED
 
-       if (StopOnEchecFils().Val())
-        {    
-            ELISE_ASSERT(makeSucceeded,"Error in child process");
+       if ((! makeSucceeded) && StopOnEchecFils().Val())
+        {
+            // Soft-fail path for adaptive NbProc backoff: only hard-assert if N already 1
+            // (caller may retry with smaller ByProcess when makeSucceeded==false).
+            if (thread_count <= 1)
+            {
+                ELISE_ASSERT(makeSucceeded,"Error in child process");
+            }
+            mCout << " ---End Process (make FAILED j=" << thread_count << ")\n";
+            return false;
         }
 	    mCout << " ---End Process\n";
+        return makeSucceeded;
     }//else 
    else 
    {
@@ -2285,6 +2298,7 @@ void cAppliMICMAC::ExeProcessParallelisable
        fic.close();
 	*/
        mCout << " ---End Process\n"; 
+       return true;
    }
 }
 

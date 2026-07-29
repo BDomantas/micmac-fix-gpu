@@ -3142,7 +3142,8 @@ class cAppliMICMAC  : public   cParamMICMAC,
                    const std::string & aNameSymb
                ) const;
 
-        void ExeProcessParallelisable (bool AddNameExeMicMac,
+        /// Returns false if a parallel child/make failed (when StopOnEchecFils, still asserts).
+        bool ExeProcessParallelisable (bool AddNameExeMicMac,
                      const  std::list<std::string> & aLProc);
         const double  & RecouvrementMinimal() const;
         cFileOriMnt GetOri(const std::string & aNameOri) const;

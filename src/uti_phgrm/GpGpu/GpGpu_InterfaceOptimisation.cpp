@@ -2,6 +2,7 @@
 #include <cuda_runtime.h> // RUNPOD_GPGPU_DIAG
 #include "GpGpu/GpGpu_InterOptimisation.h"
 #include "GpGpu/GpGpu_Diag.h"
+#include "GpGpu/GpGpu_AutoNbProc.h"
 
 InterfOptimizGpGpu::InterfOptimizGpGpu()
 {
@@ -77,6 +78,7 @@ void InterfOptimizGpGpu::optimisation()
         else
             GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] optimisation Gpu_OptimisationOneDirection END (sync ok)\n");
     }
+    gpgpu_auto::SampleGpuNow();
 
     GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] optimisation CopyDevicetoHost BEGIN\n");
     _D_data2Opt.CopyDevicetoHost(_H_data2Opt,GetIdBuf());

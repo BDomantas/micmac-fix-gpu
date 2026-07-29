@@ -39,6 +39,10 @@ English :
 
 Header-MicMac-eLiSe-25/06/2007*/
 #include "StdAfx.h"
+
+#if CUDA_ENABLED
+#include "GpGpu/GpGpu_AutoNbProc.h"
+#endif
 #include "../src/uti_phgrm/MICMAC/MICMAC.h"
 
 int cAppliMICMAC::MemSizePixelImage() const
@@ -454,6 +458,29 @@ std::cout << "CCMMM = " << aBoxClip._p0 << " " << aBoxClip._p1 << "\n"; getchar(
                               Box2di(-aPRec,aPRec)
                          );
      
+     // --- Adaptive GPU NbProc (probe first box in-process, then parallel remaining) ---
+     // Active when: master process, ByProcess>=2, GPU correl, MICMAC_GPU_AUTO_NBPROC enabled.
+     bool aGpuCorrel = false;
+#if CUDA_ENABLED
+     aGpuCorrel =
+            (mCorrelAdHoc != 0 && mCorrelAdHoc->TypeCAH().GPU_CorrelBasik().IsInit())
+         || (mCMS != 0 && mCMS->UseGpGpu().Val());
+#endif
+     const int aUserByP = ByProcess().Val();
+     const bool aDoAutoNb =
+            (! CalledByProcess().Val())
+         && (aUserByP >= 2)
+         && aGpuCorrel
+#if CUDA_ENABLED
+         && gpgpu_auto::Enabled()
+#else
+         && false
+#endif
+         ;
+
+     bool aDidProbeBox = false;
+     int  aAutoN = aUserByP;
+
      for (mKBox=0 ; mKBox<aDecInterv.NbInterv() ; mKBox++)
      {
           if (
@@ -482,27 +509,34 @@ std::cout << "CCMMM = " << aBoxClip._p0 << " " << aBoxClip._p1 << "\n"; getchar(
                       aBoxClip
                   );
                }
+               else if (aDoAutoNb && (! aDidProbeBox))
+               {
+                  // Probe box: run alone in master so SampleGpuNow() sees peak VRAM.
+#if CUDA_ENABLED
+                  gpgpu_auto::ResetPeak();
+#endif
+                  mCout << " [AUTO_NBPROC] probe box " << (mKBox+1)
+                        << " / " << aDecInterv.NbInterv()
+                        << " in-process (DeZoom=" << anEtape.DeZoomTer() << ")\n";
+                  DoOneBloc
+                  (
+                      aDecInterv.KthIntervOut(mKBox),
+                      aDecInterv.KthIntervIn(mKBox),
+                      0,
+                      aBoxClip
+                  );
+#if CUDA_ENABLED
+                  aAutoN = gpgpu_auto::ComputeNbProc(aUserByP);
+                  gpgpu_auto::StopPeak();
+#else
+                  aAutoN = aUserByP;
+#endif
+                  aDidProbeBox = true;
+                  mCout << " [AUTO_NBPROC] remaining boxes will use ByProcess="
+                        << aAutoN << " (user max was " << aUserByP << ")\n";
+               }
                else
                {
-/*
-                   int aNumEt = anEtape.Num();
-                   //mNameExe + std::string(" ")
-		   //  Modif MPD, reordonne pour mettre Arg d'etape a la fin
-                   //  Modif Greg: probleme de '"' pour condor
-                   //std::string aNameProcess = std::string("\"")+mNameXML+std::string("\"")
-		   std::string aNameProcess = mNameXML 
-                               + std::string(" CalledByProcess=1 ")
-                               + std::string(" ByProcess=0 ");
-
-                   for (int aKArg=0; aKArg<mNbArgAux ; aKArg++)
-                       aNameProcess =   aNameProcess
-                                      + std::string(" ")
-                                      + std::string(mArgAux[aKArg]);
-
-                   aNameProcess = aNameProcess
-                               + std::string(" FirstEtapeMEC=") + ToString(aNumEt)
-                               + std::string(" LastEtapeMEC=") + ToString(aNumEt+1)
-*/
 		   std::string aNameProcess = 
                                  PrefixGenerikRecalEtapeMicmMac(anEtape)
                                + std::string(" FirstBoiteMEC=") + ToString(mKBox)
@@ -512,7 +546,46 @@ std::cout << "CCMMM = " << aBoxClip._p0 << " " << aBoxClip._p1 << "\n"; getchar(
                }
           }
      }
-     if (ByProcess().Val()!=0)
+     if (ByProcess().Val()!=0 && (! aLStrProcess.empty()))
+     {
+        const int aOldByP = ByProcess().Val();
+        int aTryN = aDidProbeBox ? aAutoN : aOldByP;
+        if (aTryN < 1)
+            aTryN = 1;
+
+        char aBuf[32];
+        bool aOk = false;
+        while (aTryN >= 1)
+        {
+            ByProcess().SetVal(aTryN);
+            snprintf(aBuf, sizeof(aBuf), "%d", aTryN);
+#if (ELISE_windows)
+            _putenv_s("MICMAC_MAX_THREADS", aBuf);
+#else
+            setenv("MICMAC_MAX_THREADS", aBuf, 1);
+#endif
+            mCout << " ---Launch remaining " << aLStrProcess.size()
+                  << " boxes with ByProcess=" << aTryN
+                  << (aDidProbeBox ? " (auto)" : "") << "\n";
+            aOk = ExeProcessParallelisable(true, aLStrProcess);
+            if (aOk)
+                break;
+            if (aTryN <= 1)
+                break;
+            int aNext = aTryN / 2;
+            if (aNext < 1)
+                aNext = 1;
+            mCout << " [AUTO_NBPROC] backoff " << aTryN << " → " << aNext
+                  << " after worker failure; retry remaining boxes\n";
+            aTryN = aNext;
+        }
+        if ((! aOk) && StopOnEchecFils().Val())
+        {
+            ELISE_ASSERT(false, "Error in child process after adaptive NbProc backoff");
+        }
+        ByProcess().SetVal(aOldByP);
+     }
+     else if (ByProcess().Val()!=0)
         ExeProcessParallelisable(true,aLStrProcess);
 	 
 

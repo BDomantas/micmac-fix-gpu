@@ -2,6 +2,7 @@
 #include <cuda_runtime.h> // RUNPOD_GPGPU_DIAG
 #include "GpGpu/GpGpu_InterCorrel.h"
 #include "GpGpu/GpGpu_Diag.h"
+#include "GpGpu/GpGpu_AutoNbProc.h"
 
 /// \brief Constructeur GpGpuInterfaceCorrel
 GpGpuInterfaceCorrel::GpGpuInterfaceCorrel():
@@ -105,6 +106,8 @@ void GpGpuInterfaceCorrel::BasicCorrelation()
         else
             GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] BasicCorrelation MultiCorrelationGpGpu END (sync ok)\n");
     }
+    // Peak VRAM while correl volumes still resident (auto NbProc probe).
+    gpgpu_auto::SampleGpuNow();
 
     // Copier les resultats de calcul des couts du device vers le host!
 
