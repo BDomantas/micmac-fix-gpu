@@ -64,6 +64,8 @@ int Tawny_main(int argc,char ** argv)
 
     double  aSatThresh = 1e9;
     string aNameOut="Orthophotomosaic.tif";
+    // Multi-core Porto mosaic (MapBoxes ortho). Radiom sampling/solve stays 1 process.
+    int mNbProc = 1;
 
     ElInitArgMain
     (
@@ -84,6 +86,7 @@ int Tawny_main(int argc,char ** argv)
                  << EAM(mDoL1Filter,"L1F",true,"Do L1 Filter on couple, def=true (change when process is blocked)", eSAM_IsBool)
                  << EAM(aSatThresh,"SatThresh",true,"Threshold determining saturation value (pixel >SatThresh will be ignored)")
                  << EAM(aNameOut,"Out",true,"Name of output file (in the folder)", eSAM_IsOutputFile)
+                 << EAM(mNbProc,"NbProc",true,"CPU workers for Porto mosaic boxes (Def=1; radiom solve stays single-process)")
     );
 
     if (!MMVisualMode)
@@ -127,6 +130,21 @@ int Tawny_main(int argc,char ** argv)
         if (!mDoL1Filter) aCom  = aCom +" +DoL1Filter=false ";
 	if (!mDoRadiomEgal) aCom  = aCom +" +DoRadiomEgal=false ";
 
+        // Porto reads MICMAC_PORTO_NBPROC (N-core mosaic MapBoxes). Default 1 = stock.
+        if (mNbProc < 1)
+            mNbProc = 1;
+        {
+            char aBuf[64];
+            snprintf(aBuf, sizeof(aBuf), "%d", mNbProc);
+#if (ELISE_windows)
+            _putenv_s("MICMAC_PORTO_NBPROC", aBuf);
+#else
+            setenv("MICMAC_PORTO_NBPROC", aBuf, 1);
+#endif
+            std::cout << "[Tawny] MICMAC_PORTO_NBPROC=" << mNbProc
+                      << " (ortho mosaic workers; radiom sampling/solve is 1 process)\n";
+        }
+
         std::cout << aCom << "\n";
         int aRes = System(aCom.c_str(),DEF_SVP_System,true);
         // int aRes = system_call(aCom.c_str());
@@ -143,7 +161,7 @@ int Tawny_main(int argc,char ** argv)
 
 /*Footer-MicMac-eLiSe-25/06/2007
 
-Ce logiciel est un programme informatique servant �  la mise en
+Ce logiciel est un programme informatique servant �  la mise en
 correspondances d'images pour la reconstruction du relief.
 
 Ce logiciel est régi par la licence CeCILL-B soumise au droit français et
@@ -159,17 +177,17 @@ seule une responsabilité restreinte pèse sur l'auteur du programme,  le
 titulaire des droits patrimoniaux et les concédants successifs.
 
 A cet égard  l'attention de l'utilisateur est attirée sur les risques
-associés au chargement,  �  l'utilisation,  �  la modification et/ou au
-développement et �  la reproduction du logiciel par l'utilisateur étant
-donné sa spécificité de logiciel libre, qui peut le rendre complexe �
-manipuler et qui le réserve donc �  des développeurs et des professionnels
+associés au chargement,  �  l'utilisation,  �  la modification et/ou au
+développement et �  la reproduction du logiciel par l'utilisateur étant
+donné sa spécificité de logiciel libre, qui peut le rendre complexe �
+manipuler et qui le réserve donc �  des développeurs et des professionnels
 avertis possédant  des  connaissances  informatiques approfondies.  Les
-utilisateurs sont donc invités �  charger  et  tester  l'adéquation  du
-logiciel �  leurs besoins dans des conditions permettant d'assurer la
+utilisateurs sont donc invités �  charger  et  tester  l'adéquation  du
+logiciel �  leurs besoins dans des conditions permettant d'assurer la
 sécurité de leurs systèmes et ou de leurs données et, plus généralement,
-�  l'utiliser et l'exploiter dans les mêmes conditions de sécurité.
+�  l'utiliser et l'exploiter dans les mêmes conditions de sécurité.
 
-Le fait que vous puissiez accéder �  cet en-tête signifie que vous avez
+Le fait que vous puissiez accéder �  cet en-tête signifie que vous avez
 pris connaissance de la licence CeCILL-B, et que vous en avez accepté les
 termes.
 Footer-MicMac-eLiSe-25/06/2007*/

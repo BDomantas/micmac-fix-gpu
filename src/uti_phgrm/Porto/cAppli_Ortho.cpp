@@ -38,6 +38,64 @@ English :
 Header-MicMac-eLiSe-25/06/2007*/
 #include "StdAfx.h"
 
+#if (ELISE_unix || ELISE_MacOs || ELISE_Cygwin)
+#include <sys/file.h>
+#include <sys/wait.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <errno.h>
+#include <cstdlib>
+#include <vector>
+#else
+#include <cstdlib>
+#endif
+
+static int PortoReadNbProcEnv()
+{
+    const char * aEnv = getenv("MICMAC_PORTO_NBPROC");
+    if (aEnv && aEnv[0])
+    {
+        int aN = atoi(aEnv);
+        if (aN >= 1)
+            return aN;
+    }
+    return 1;
+}
+
+void cAppli_Ortho::SetNbProc(int aN)
+{
+    mNbProc = ElMax(1, aN);
+}
+
+void cAppli_Ortho::LockWrite()
+{
+#if (ELISE_unix || ELISE_MacOs || ELISE_Cygwin)
+    if (mWriteLockFd < 0)
+    {
+        std::string aLock = mWorkDir + std::string("PortoWrite.lock");
+        mWriteLockFd = ::open(aLock.c_str(), O_CREAT | O_RDWR, 0666);
+    }
+    if (mWriteLockFd >= 0)
+    {
+        while (flock(mWriteLockFd, LOCK_EX) != 0)
+        {
+            if (errno != EINTR)
+                break;
+        }
+    }
+#endif
+}
+
+void cAppli_Ortho::UnlockWrite()
+{
+#if (ELISE_unix || ELISE_MacOs || ELISE_Cygwin)
+    if (mWriteLockFd >= 0)
+        flock(mWriteLockFd, LOCK_UN);
+#endif
+}
+
+
+
 
 /*************************************************/
 /*                                               */
@@ -164,7 +222,9 @@ cAppli_Ortho::cAppli_Ortho
     mSeuilCorrel (-1),
     mNbPtMoyPerIm (0),
     mDynGlob      (aCO.DynGlob().Val()),
-    mNbIm2Test   (0)
+    mNbIm2Test   (0),
+    mNbProc      (PortoReadNbProcEnv()),
+    mWriteLockFd (-1)
 {
 // std::cout << "DGGGGGgg "<< mDynGlob << "\n"; getchar();
     if (mEgalise)
@@ -459,18 +519,21 @@ void cAppli_Ortho::SauvAll()
 }
 void cAppli_Ortho::SauvOrtho()
 {
+    LockWrite();
     ELISE_COPY
     (
         rectangle(mCurBoxOut._p0,mCurBoxOut._p1),
         trans(StdInput(mIms),-mCurBoxIn._p0),
         mFileOrtho->out()
     );
+    UnlockWrite();
 }
 
 void cAppli_Ortho::SauvLabel()
 {
    if ((!mCO.NameLabels().IsInit()) || (mCO.NameLabels().Val() =="NoLabel"))
       return;
+   LockWrite();
    bool IsNew;
    Tiff_Im aTF = Tiff_Im::CreateIfNeeded
                   (
@@ -493,6 +556,7 @@ void cAppli_Ortho::SauvLabel()
         trans(aFonc,-mCurBoxIn._p0),
         aTF.out()
     );
+    UnlockWrite();
 }
 
 void cAppli_Ortho::VisuLabel()
@@ -592,17 +656,117 @@ void cAppli_Ortho::MapBoxes(eModeMapBox aMode)
    Resize(mSzMaxIn);
   
    mIms = mTF0->VecOfIm(mSzMaxIn);
-   for (int aKB=mCO.KBox0().Val(); aKB<aDI2D.NbInterv() ;aKB++)
+
+   const int aK0 = mCO.KBox0().Val();
+   const int aNbBox = aDI2D.NbInterv();
+   int aNbProc = ElMax(1, mNbProc);
+
+   // Radiometric sampling mutates a global equation system — keep single-process.
+   // Ortho mosaic boxes are independent given frozen models → multi-core via fork.
+   const bool aDoParallel =
+        (aMode == eModeOrtho)
+     && (aNbProc > 1)
+     && (aNbBox - aK0 > 1);
+
+   if (!aDoParallel)
    {
-       std::cout << "KBOX = " << aKB << " On " << aDI2D.NbInterv() << "\n";
-       DoOneBox
-       ( 
-            aDI2D.KthIntervOut(aKB),
-            aDI2D.KthIntervIn(aKB),
-            aMode
-       );
+       if (aMode == eModeOrtho)
+       {
+           std::cout << "[Porto] MapBoxes ortho sequential NbProc=" << aNbProc
+                     << " boxes=[" << aK0 << "," << aNbBox << ")\n";
+       }
+       for (int aKB = aK0; aKB < aNbBox; aKB++)
+       {
+           std::cout << "KBOX = " << aKB << " On " << aNbBox << "\n";
+           DoOneBox
+           (
+                aDI2D.KthIntervOut(aKB),
+                aDI2D.KthIntervIn(aKB),
+                aMode
+           );
+       }
+       return;
    }
-   
+
+#if (ELISE_unix || ELISE_MacOs || ELISE_Cygwin)
+   aNbProc = ElMin(aNbProc, aNbBox - aK0);
+   std::cout << "[Porto] MapBoxes ortho PARALLEL NbProc=" << aNbProc
+             << " boxes=[" << aK0 << "," << aNbBox << ") "
+             << "(process fan-out; TIFF writes flock-serialized)\n";
+   fflush(stdout);
+
+   std::vector<pid_t> aPids;
+   aPids.reserve(aNbProc);
+
+   for (int aT = 0; aT < aNbProc; aT++)
+   {
+       const int aB0 = aK0 + (aNbBox - aK0) * aT / aNbProc;
+       const int aB1 = aK0 + (aNbBox - aK0) * (aT + 1) / aNbProc;
+       if (aB0 >= aB1)
+           continue;
+
+       pid_t aPid = fork();
+       if (aPid < 0)
+       {
+           std::cout << "[Porto] fork failed errno=" << errno
+                     << " — falling back to sequential for boxes ["
+                     << aB0 << "," << aB1 << ")\n";
+           for (int aKB = aB0; aKB < aB1; aKB++)
+           {
+               std::cout << "KBOX = " << aKB << " On " << aNbBox << "\n";
+               DoOneBox(aDI2D.KthIntervOut(aKB), aDI2D.KthIntervIn(aKB), aMode);
+           }
+           continue;
+       }
+       if (aPid == 0)
+       {
+           // Child: private address space (COW of solved radiom models from parent).
+           // Re-bind working images (parent's mIms may share unsafe state post-fork).
+           mIms = mTF0->VecOfIm(mSzMaxIn);
+           mReserveLoadedIms.clear();
+           mVLI.clear();
+           mWriteLockFd = -1; // reopen lock in this process on first write
+
+           for (int aKB = aB0; aKB < aB1; aKB++)
+           {
+               std::cout << "KBOX = " << aKB << " On " << aNbBox
+                         << " [worker " << aT << "/" << aNbProc << " pid="
+                         << (int)getpid() << "]\n";
+               fflush(stdout);
+               DoOneBox(aDI2D.KthIntervOut(aKB), aDI2D.KthIntervIn(aKB), aMode);
+           }
+           fflush(stdout);
+           _exit(0);
+       }
+       aPids.push_back(aPid);
+   }
+
+   int aFail = 0;
+   for (size_t aK = 0; aK < aPids.size(); aK++)
+   {
+       int aStatus = 0;
+       if (waitpid(aPids[aK], &aStatus, 0) < 0)
+       {
+           aFail++;
+           continue;
+       }
+       if (!WIFEXITED(aStatus) || WEXITSTATUS(aStatus) != 0)
+       {
+           std::cout << "[Porto] worker pid=" << (int)aPids[aK]
+                     << " failed status=" << aStatus << "\n";
+           aFail++;
+       }
+   }
+   ELISE_ASSERT(aFail == 0, "Porto parallel MapBoxes: one or more workers failed");
+   std::cout << "[Porto] MapBoxes ortho PARALLEL done workers=" << aPids.size() << "\n";
+#else
+   std::cout << "[Porto] MapBoxes: parallel ortho requires Unix fork; using sequential\n";
+   for (int aKB = aK0; aKB < aNbBox; aKB++)
+   {
+       std::cout << "KBOX = " << aKB << " On " << aNbBox << "\n";
+       DoOneBox(aDI2D.KthIntervOut(aKB), aDI2D.KthIntervIn(aKB), aMode);
+   }
+#endif
 }
 
 
@@ -623,7 +787,7 @@ const std::string &  cAppli_Ortho::WD() const
 
 /*Footer-MicMac-eLiSe-25/06/2007
 
-Ce logiciel est un programme informatique servant �  la mise en
+Ce logiciel est un programme informatique servant �  la mise en
 correspondances d'images pour la reconstruction du relief.
 
 Ce logiciel est régi par la licence CeCILL-B soumise au droit français et
@@ -639,17 +803,17 @@ seule une responsabilité restreinte pèse sur l'auteur du programme,  le
 titulaire des droits patrimoniaux et les concédants successifs.
 
 A cet égard  l'attention de l'utilisateur est attirée sur les risques
-associés au chargement,  �  l'utilisation,  �  la modification et/ou au
-développement et �  la reproduction du logiciel par l'utilisateur étant 
-donné sa spécificité de logiciel libre, qui peut le rendre complexe �  
-manipuler et qui le réserve donc �  des développeurs et des professionnels
+associés au chargement,  �  l'utilisation,  �  la modification et/ou au
+développement et �  la reproduction du logiciel par l'utilisateur étant 
+donné sa spécificité de logiciel libre, qui peut le rendre complexe �  
+manipuler et qui le réserve donc �  des développeurs et des professionnels
 avertis possédant  des  connaissances  informatiques approfondies.  Les
-utilisateurs sont donc invités �  charger  et  tester  l'adéquation  du
-logiciel �  leurs besoins dans des conditions permettant d'assurer la
+utilisateurs sont donc invités �  charger  et  tester  l'adéquation  du
+logiciel �  leurs besoins dans des conditions permettant d'assurer la
 sécurité de leurs systèmes et ou de leurs données et, plus généralement, 
-�  l'utiliser et l'exploiter dans les mêmes conditions de sécurité. 
+�  l'utiliser et l'exploiter dans les mêmes conditions de sécurité. 
 
-Le fait que vous puissiez accéder �  cet en-tête signifie que vous avez 
+Le fait que vous puissiez accéder �  cet en-tête signifie que vous avez 
 pris connaissance de la licence CeCILL-B, et que vous en avez accepté les
 termes.
 Footer-MicMac-eLiSe-25/06/2007*/

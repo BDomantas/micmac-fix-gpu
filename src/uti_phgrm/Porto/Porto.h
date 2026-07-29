@@ -187,6 +187,14 @@ class cAppli_Ortho
          {
               return   mDynGlob;
          }
+
+         /// CPU workers for mosaic box loop (1 = stock sequential). Set via MICMAC_PORTO_NBPROC or Tawny NbProc=.
+         int         NbProc() const { return mNbProc; }
+         void        SetNbProc(int aN);
+
+         /// Serialize TIFF writes when multiple workers touch the same Ortho/Label products.
+         void        LockWrite();
+         void        UnlockWrite();
      private :
 
          Box2di  BoxImageGlob();
@@ -297,6 +305,9 @@ class cAppli_Ortho
          double                             mDynGlob;
          int                                mNbIm2Test;
          int                                mNbLoadedIm2Test;
+
+         int                                mNbProc;      // >=1 CPU workers for ortho boxes
+         int                                mWriteLockFd; // flock fd for Ortho/Label writes (-1 if unused)
 };
 
 
