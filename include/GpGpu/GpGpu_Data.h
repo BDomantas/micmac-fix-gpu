@@ -70,19 +70,19 @@ protected:
     void            SetPData(T *p){ _data = p;}
 
 	///
-	/// \brief abDealloc Désallocation de la mémoire
-	/// \return true si la désallocation est reussie
+	/// \brief abDealloc Dï¿½sallocation de la mï¿½moire
+	/// \return true si la dï¿½sallocation est reussie
 	///
     virtual bool    abDealloc(){ return false;} // TODO pour le rendre completement virtuelle il faut reimplementer les destructeurs...
 
 	///
-	/// \brief abMalloc Allocation de la mémoire
+	/// \brief abMalloc Allocation de la mï¿½moire
 	/// \return
 	///
     virtual bool    abMalloc(){ return false;}
 
 	///
-	/// \brief Sizeof retourn le taille de la structure en mémoire
+	/// \brief Sizeof retourn le taille de la structure en mï¿½moire
 	/// \return
 	///
     virtual uint    Sizeof(){return 0;}
@@ -451,7 +451,7 @@ public:
     bool			Realloc(uint2 dim);
 
 	///
-	/// \brief ReallocIfDim Reallocation mémoire si le dimension est supèrieure à la dimension actuelle
+	/// \brief ReallocIfDim Reallocation mï¿½moire si le dimension est supï¿½rieure ï¿½ la dimension actuelle
 	/// \param dim Taille de l'allocation en 2 dimensions
 	/// \return
 	///
@@ -542,21 +542,21 @@ public:
     bool			Realloc(uint size){return Realloc(make_uint2(size,1),1);}
 
 	///
-	/// \brief Realloc Reallocation de la mémoire de taille dim
+	/// \brief Realloc Reallocation de la mï¿½moire de taille dim
 	/// \param dim Taille de l'allocation de dimension 3
 	/// \return
 	///
     bool			Realloc(uint3 dim){return Realloc(make_uint2(dim.x,dim.y),dim.z);}
 
 	///
-	/// \brief ReallocIf Reallocation si la nouvelle taille est supèrieure à l'actuelle
+	/// \brief ReallocIf Reallocation si la nouvelle taille est supï¿½rieure ï¿½ l'actuelle
 	/// \param dim1D Taille de l'allocation
 	/// \return
 	///
     bool			ReallocIf(uint dim1D);
 
 	///
-	/// \brief ReallocIf Reallocation si la nouvelle taille est supèrieure à l'actuelle
+	/// \brief ReallocIf Reallocation si la nouvelle taille est supï¿½rieure ï¿½ l'actuelle
 	/// \param dim taille de dimension 2
 	/// \param l taille sur la dimension Z
 	/// \return
@@ -564,7 +564,7 @@ public:
     bool			ReallocIf(uint2 dim, uint l = 1);
 
 	///
-	/// \brief ReallocIf Reallocation si la nouvelle taille est supèrieure à l'actuelle
+	/// \brief ReallocIf Reallocation si la nouvelle taille est supï¿½rieure ï¿½ l'actuelle
 	/// \param dimX Taille sur X
 	/// \param dimY Taille sur Y
 	/// \param l Taille sur Z
@@ -573,7 +573,7 @@ public:
     bool			ReallocIf(uint dimX, uint dimY, uint l = 1);
 
 	///
-	/// \brief ReallocIfDim Reallocation si la nouvelle taille est supèrieure à l'actuelle
+	/// \brief ReallocIfDim Reallocation si la nouvelle taille est supï¿½rieure ï¿½ l'actuelle
 	/// \param dim taille de dimension 2
 	/// \param l taille sur la dimension Z
 	/// \return
@@ -582,7 +582,7 @@ public:
 
 	///
 	/// \brief operator []
-	/// \param pt coordonnées de la données requeter
+	/// \param pt coordonnï¿½es de la donnï¿½es requeter
 	/// \return retourne la valeur
 	///
     T&              operator[](uint2 pt);
@@ -727,8 +727,8 @@ public:
 
 	///
 	/// \brief CuHostData3D Constructeur
-	/// \param pgLockMem Option de mémoire paginée
-	/// \param alignMemory Option de mémoire alignée
+	/// \param pgLockMem Option de mï¿½moire paginï¿½e
+	/// \param alignMemory Option de mï¿½moire alignï¿½e
 	///
 	CuHostData3D(bool pgLockMem = NOPAGLOCKMEM,bool alignMemory = NOALIGNM128){init(pgLockMem,alignMemory);}
 
@@ -736,8 +736,8 @@ public:
 	/// \param dimX Dimension 1D a initialiser
 	/// \param dimY Dimension 1D a initialiser
 	/// \param l Taille de la 3eme dimension
-	/// \param pgLockMem Option de mémoire paginée
-	/// \param alignMemory Option de mémoire alignée
+	/// \param pgLockMem Option de mï¿½moire paginï¿½e
+	/// \param alignMemory Option de mï¿½moire alignï¿½e
 	///
 	CuHostData3D(uint dimX, uint dimY = 1, uint l = 1, bool pgLockMem = NOPAGLOCKMEM,bool alignMemory = NOALIGNM128){init(pgLockMem,alignMemory,make_uint2(dimX,dimY),l);}
 
@@ -775,7 +775,7 @@ public:
 	///
 	/// \brief pLData
 	/// \param layer
-	/// \return  le pointeur du calque pointée
+	/// \return  le pointeur du calque pointï¿½e
 	///
     T*   pLData(uint layer){ return CData<T>::pData() + layer*size(CData3D<T>::GetDimension());}
 
@@ -789,7 +789,7 @@ public:
 
 	///
 	/// \brief pgLockMem
-	/// \return Option de mémoire paginée
+	/// \return Option de mï¿½moire paginï¿½e
 	///
 	bool pgLockMem() const;
 	///
@@ -800,7 +800,7 @@ public:
 
 	///
 	/// \brief alignMemory
-	/// \return Option de mémoire alignée
+	/// \return Option de mï¿½moire alignï¿½e
 	///
 	bool alignMemory() const;
 
@@ -1096,7 +1096,7 @@ protected:
 
 
 /// \class CuDeviceData3D
-/// \brief Structure 3d de données instanciées dans la mémoire globale vidéo
+/// \brief Structure 3d de donnï¿½es instanciï¿½es dans la mï¿½moire globale vidï¿½o
 template <class T>
 class CuDeviceData3D : public CData3D<T>, public DecoratorDeviceData<T,cudaContext>
 {
@@ -1106,16 +1106,16 @@ public:
 
 	///
 	/// \brief CuDeviceData3D Constructeur de la classe
-	/// \param dim	Dimension 2D de la structure de données
+	/// \param dim	Dimension 2D de la structure de donnï¿½es
 	/// \param l	Taille de la structure dans la dimansion 3 (Z)
-	/// \param name Nommer la sctructure pour le débogage
+	/// \param name Nommer la sctructure pour le dï¿½bogage
 	///
     CuDeviceData3D(uint2 dim,uint l, string name = "NoName"):DecoratorDeviceData<T,cudaContext>(this) { init(name,dim,l);}
 
 	///
 	/// \brief CuDeviceData3D
-	/// \param dim	Dimension totale de la structure de données
-	/// \param name Nommer la sctructure pour le débogage
+	/// \param dim	Dimension totale de la structure de donnï¿½es
+	/// \param name Nommer la sctructure pour le dï¿½bogage
     CuDeviceData3D(uint dim, string name = "NoName"):DecoratorDeviceData<T,cudaContext>(this){init(name,make_uint2(dim,1),1);}
 
     /// \brief Initialise toutes les valeurs du tableau a val
@@ -1123,9 +1123,9 @@ public:
     bool        Memset(int val){return DecoratorDeviceData<T,cudaContext>::Memset(val);}
 
 	///
-	/// \brief CopyDevicetoHost Copier le contenue de la mémoire globale de la structure vers l'hote
+	/// \brief CopyDevicetoHost Copier le contenue de la mï¿½moire globale de la structure vers l'hote
 	/// \param hostData pointeur hote de destination
-	/// \return vrais si l'opération a réussi
+	/// \return vrais si l'opï¿½ration a rï¿½ussi
 	///
     bool        CopyDevicetoHost(CuHostData3D<T> &hostData){return  DecoratorDeviceData<T,cudaContext>::CopyDevicetoHost(hostData.pData());}
 
@@ -1194,6 +1194,13 @@ public:
         return CData3D<cudaArray>::Dealloc();
     }
 
+    /// \brief  renvoie le tableau cuda contenant les valeurs de l'image
+    /// Phase C: public so SData2Correl can build cudaTextureObject_t handles.
+    cudaArray*	GetCudaArray()
+    {
+        return pData();
+    }
+
 protected:
 
     DecoratorImage(){}
@@ -1204,12 +1211,6 @@ protected:
     {
         std::cout << "PAS DE MEMSET POUR CUDA ARRAY" << "\n";
         return true;
-    }
-
-    /// \brief  renvoie le tableau cuda contenant les valeurs de l'image
-    cudaArray*	GetCudaArray()
-    {
-        return pData();
     }
 
 
@@ -1295,7 +1296,7 @@ public:
     }
 
 	///
-	/// \brief SetNameImage Nommer l'image pour le débogage
+	/// \brief SetNameImage Nommer l'image pour le dï¿½bogage
 	/// \param name Le nom a donner
 	///
     void SetNameImage(string name)
@@ -1304,7 +1305,7 @@ public:
     }
 
 	///
-	/// \brief syncDevice Copier les données de l'hote vers le device
+	/// \brief syncDevice Copier les donnï¿½es de l'hote vers le device
 	/// \param hostData Pointeur source
 	/// \param texture Texture destinataire
 	/// \return
@@ -1449,7 +1450,7 @@ public:
 
 
 	///
-	/// \brief syncDevice Copier les données de l'hote vers le device
+	/// \brief syncDevice Copier les donnï¿½es de l'hote vers le device
 	/// \param hostData Pointeur source
 	/// \param texture Texture destinataire
 	/// \return
@@ -1485,7 +1486,7 @@ private:
     {
         cudaExtent sizeImgsLay      = CudaExtent();
 
-        // Déclaration des parametres de copie 3D
+        // Dï¿½claration des parametres de copie 3D
         cudaMemcpy3DParms	p		= { 0 };
         cudaPitchedPtr		pitch	= make_cudaPitchedPtr(data, sizeImgsLay.width * sizeof(T), sizeImgsLay.width, sizeImgsLay.height);
 
@@ -1508,23 +1509,23 @@ private:
 template<class T>
 ///
 /// \brief The CuUnifiedData3D struct
-/// Structure de données unifiées
-/// Cette structure de données est constituées d'un espace mémoire sur l'hote et un espace identique sur le device
+/// Structure de donnï¿½es unifiï¿½es
+/// Cette structure de donnï¿½es est constituï¿½es d'un espace mï¿½moire sur l'hote et un espace identique sur le device
 struct CuUnifiedData3D
 {
 	///
-	/// \brief deviceData les données sur le device
+	/// \brief deviceData les donnï¿½es sur le device
 	///
     CuDeviceData3D<T>   deviceData;
 	///
-	/// \brief hostData les données sur l'hote
+	/// \brief hostData les donnï¿½es sur l'hote
 	///
     CuHostData3D<T>     hostData;
 
 	///
-	/// \brief Malloc Allocation de  la mémoire pour l'hote et le device
-	/// \param dim Taille 2d des structures de données
-	/// \param l Taille en Z des structures de données
+	/// \brief Malloc Allocation de  la mï¿½moire pour l'hote et le device
+	/// \param dim Taille 2d des structures de donnï¿½es
+	/// \param l Taille en Z des structures de donnï¿½es
 	///
     void Malloc( uint2 dim, uint l )
     {
@@ -1534,7 +1535,7 @@ struct CuUnifiedData3D
 
 	///
 	/// \brief syncDevice
-	/// Copier les données de l'hote vers le device
+	/// Copier les donnï¿½es de l'hote vers le device
     void syncDevice()
     {
         deviceData.CopyHostToDevice(hostData.pData());
@@ -1543,7 +1544,7 @@ struct CuUnifiedData3D
 
 	///
 	/// \brief syncHost
-	/// Copier les données du device vers l'hote
+	/// Copier les donnï¿½es du device vers l'hote
     void syncHost()
     {
         deviceData.CopyDevicetoHost(hostData);
@@ -1551,9 +1552,9 @@ struct CuUnifiedData3D
 
 
 	///
-	/// \brief ReallocIfDim Reallocation mémoire si la dimension totale est supérieur à la précédente
-	/// \param dim Taille 2d des structures de données
-	/// \param l Taille en Z des structures de données
+	/// \brief ReallocIfDim Reallocation mï¿½moire si la dimension totale est supï¿½rieur ï¿½ la prï¿½cï¿½dente
+	/// \param dim Taille 2d des structures de donnï¿½es
+	/// \param l Taille en Z des structures de donnï¿½es
 	///
     void ReallocIfDim(uint2 dim, uint l)
     {
@@ -1562,7 +1563,7 @@ struct CuUnifiedData3D
     }
 
 	///
-	/// \brief Reallocation mémoire si la dimension totale est supérieur à la précédente
+	/// \brief Reallocation mï¿½moire si la dimension totale est supï¿½rieur ï¿½ la prï¿½cï¿½dente
 	/// \param size Taille totale de la nouvelle allocation
 	///
 	void ReallocIfDim(uint size)
@@ -1574,7 +1575,7 @@ struct CuUnifiedData3D
 	}
 
 	///
-	/// \brief Dealloc Désalocation de la mémoire des deux structures
+	/// \brief Dealloc Dï¿½salocation de la mï¿½moire des deux structures
 	///
     void Dealloc()
     {
@@ -1584,7 +1585,7 @@ struct CuUnifiedData3D
 
 	///
 	/// \brief pData
-	/// \return le pointeur sur les données du device
+	/// \return le pointeur sur les donnï¿½es du device
 	///
     T* pData()
     {
@@ -1592,9 +1593,9 @@ struct CuUnifiedData3D
     }
 
 	///
-	/// \brief SetName Nommer la structure pour le débogage
+	/// \brief SetName Nommer la structure pour le dï¿½bogage
 	/// \param name Nom
-	/// \param id Agreger un identifiant à la suite du nom
+	/// \param id Agreger un identifiant ï¿½ la suite du nom
 	///
 	void SetName(string name,ushort id = 0)
 	{
