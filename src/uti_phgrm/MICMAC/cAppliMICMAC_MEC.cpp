@@ -812,18 +812,24 @@ void cAppliMICMAC::DoOneBloc
         aTimeCorrel = aChrono.ValAndInit();
         if (mShowMes)
         {
-			if((mCorrelAdHoc != 0 && mCorrelAdHoc->TypeCAH().GPU_CorrelBasik().IsInit())||
-			   (mCMS!=0 && mCMS->UseGpGpu().Val()))
-
-				mCout << "       Cuda Correlation Finished, Begin Cuda Optimisation\n";
-				fprintf(stderr, "[GPGPU][RUNPOD_GPGPU_DIAG] STAGE Cuda Correlation Finished, Begin Cuda Optimisation\n"); fflush(stderr); // RUNPOD_GPGPU_DIAG fflush correl
+            if((mCorrelAdHoc != 0 && mCorrelAdHoc->TypeCAH().GPU_CorrelBasik().IsInit())||
+               (mCMS!=0 && mCMS->UseGpGpu().Val()))
+            {
+                mCout << "       Cuda Correlation Finished, Begin Cuda Optimisation\n";
+                fprintf(stderr, "[GPGPU][RUNPOD_GPGPU_DIAG] STAGE Cuda Correlation Finished, Begin Cuda Optimisation\n");
+                fflush(stderr); // RUNPOD_GPGPU_DIAG
+            }
             else
+            {
                 mCout << "       Correl Calc, Begin Opt\n";
+            }
         }
 
-        fprintf(stderr, "[GPGPU][RUNPOD_GPGPU_DIAG] STAGE mSurfOpt->SolveOpt() BEGIN\n"); fflush(stderr);
+        fprintf(stderr, "[GPGPU][RUNPOD_GPGPU_DIAG] STAGE mSurfOpt->SolveOpt() BEGIN\n");
+        fflush(stderr);
         mSurfOpt->SolveOpt();
-        fprintf(stderr, "[GPGPU][RUNPOD_GPGPU_DIAG] STAGE mSurfOpt->SolveOpt() END\n"); fflush(stderr);
+        fprintf(stderr, "[GPGPU][RUNPOD_GPGPU_DIAG] STAGE mSurfOpt->SolveOpt() END\n");
+        fflush(stderr);
 
 #if CUDA_ENABLED
         if (mCorrelAdHoc && mCorrelAdHoc->GPU_CorrelBasik().IsInit())
