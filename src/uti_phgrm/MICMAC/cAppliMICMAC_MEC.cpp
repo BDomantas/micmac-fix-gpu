@@ -42,6 +42,7 @@ Header-MicMac-eLiSe-25/06/2007*/
 
 #if CUDA_ENABLED
 #include "GpGpu/GpGpu_AutoNbProc.h"
+#include "GpGpu/GpGpu_Pipeline.h"
 #endif
 #include "../src/uti_phgrm/MICMAC/MICMAC.h"
 
@@ -458,19 +459,36 @@ std::cout << "CCMMM = " << aBoxClip._p0 << " " << aBoxClip._p1 << "\n"; getchar(
                               Box2di(-aPRec,aPRec)
                          );
      
-     // --- Adaptive GPU NbProc (probe first box in-process, then parallel remaining) ---
-     // Active when: master process, ByProcess>=2, GPU correl, MICMAC_GPU_AUTO_NBPROC enabled.
+     // --- GPU stage + pipeline (gpu-instream) / adaptive NbProc (legacy) ---
+     // GPU_STAGE: GPU correl and/or GPU optim etape — never multi-process when
+     // MICMAC_GPU_PIPELINE=1 (unless MICMAC_GPU_LEGACY_PROCESS=1).
      bool aGpuCorrel = false;
+     bool aGpuStage  = false;
 #if CUDA_ENABLED
      aGpuCorrel =
             (mCorrelAdHoc != 0 && mCorrelAdHoc->TypeCAH().GPU_CorrelBasik().IsInit())
          || (mCMS != 0 && mCMS->UseGpGpu().Val());
+     aGpuStage =
+            aGpuCorrel
+         || (anEtape.AlgoRegul() == eAlgoTestGPU);
 #endif
      const int aUserByP = ByProcess().Val();
+#if CUDA_ENABLED
+     gpgpu_pipeline::LogModeOnce(aGpuStage, aUserByP);
+#endif
+     // Phase A: in-process all GPU boxes (ignore ByProcess fan-out).
+     const bool aInProcessGpu =
+#if CUDA_ENABLED
+            aGpuStage && gpgpu_pipeline::UseInProcessBoxes();
+#else
+            false;
+#endif
+     // Auto NbProc process fan-out: disabled under pipeline mode.
      const bool aDoAutoNb =
             (! CalledByProcess().Val())
          && (aUserByP >= 2)
          && aGpuCorrel
+         && (! aInProcessGpu)
 #if CUDA_ENABLED
          && gpgpu_auto::Enabled()
 #else
@@ -478,8 +496,20 @@ std::cout << "CCMMM = " << aBoxClip._p0 << " " << aBoxClip._p1 << "\n"; getchar(
 #endif
          ;
 
+     if (aInProcessGpu)
+     {
+        mCout << " [GPU_PIPELINE] GPU_STAGE etape DeZoom=" << anEtape.DeZoomTer()
+              << " — in-process boxes (ByProcess=" << aUserByP
+              << " ignored for MEC fan-out; PC/CPU still use NbProc)\n";
+        GPGPU_DIAG_MIN(
+            "[GPGPU][PIPELINE] etape Num=%d DeZoom=%d boxes=%d mode=inprocess pid=%d\n",
+            anEtape.Num(), anEtape.DeZoomTer(), aDecInterv.NbInterv(),
+            gpgpu_pipeline::SelfPid());
+     }
+
      bool aDidProbeBox = false;
      int  aAutoN = aUserByP;
+     int  aBoxesInProcess = 0;
 
      for (mKBox=0 ; mKBox<aDecInterv.NbInterv() ; mKBox++)
      {
@@ -499,8 +529,10 @@ std::cout << "CCMMM = " << aBoxClip._p0 << " " << aBoxClip._p1 << "\n"; getchar(
                         << aDecInterv.KthIntervOut(mKBox)._p1
                         << "\n";
                }
-               if (ByProcess().Val()==0)
+               // ByProcess==0 OR Phase-A in-process GPU pipeline.
+               if (ByProcess().Val()==0 || aInProcessGpu)
                {
+                  aBoxesInProcess++;
                   DoOneBloc
                   (
                       aDecInterv.KthIntervOut(mKBox),
@@ -518,6 +550,7 @@ std::cout << "CCMMM = " << aBoxClip._p0 << " " << aBoxClip._p1 << "\n"; getchar(
                   mCout << " [AUTO_NBPROC] probe box " << (mKBox+1)
                         << " / " << aDecInterv.NbInterv()
                         << " in-process (DeZoom=" << anEtape.DeZoomTer() << ")\n";
+                  aBoxesInProcess++;
                   DoOneBloc
                   (
                       aDecInterv.KthIntervOut(mKBox),
@@ -546,7 +579,15 @@ std::cout << "CCMMM = " << aBoxClip._p0 << " " << aBoxClip._p1 << "\n"; getchar(
                }
           }
      }
-     if (ByProcess().Val()!=0 && (! aLStrProcess.empty()))
+     if (aInProcessGpu)
+     {
+        GPGPU_DIAG_MIN(
+            "[GPGPU][PIPELINE] etape done inprocess_boxes=%d queued_process=%zu "
+            "expect_mec_gpu_procs=1 pid=%d\n",
+            aBoxesInProcess, aLStrProcess.size(), gpgpu_pipeline::SelfPid());
+     }
+     // Process fan-out only when not in pipeline in-process mode.
+     if ((! aInProcessGpu) && ByProcess().Val()!=0 && (! aLStrProcess.empty()))
      {
         const int aOldByP = ByProcess().Val();
         int aTryN = aDidProbeBox ? aAutoN : aOldByP;
@@ -585,7 +626,7 @@ std::cout << "CCMMM = " << aBoxClip._p0 << " " << aBoxClip._p1 << "\n"; getchar(
         }
         ByProcess().SetVal(aOldByP);
      }
-     else if (ByProcess().Val()!=0)
+     else if ((! aInProcessGpu) && ByProcess().Val()!=0)
         ExeProcessParallelisable(true,aLStrProcess);
 	 
 
@@ -652,6 +693,8 @@ void cAppliMICMAC::DoOneBloc
           const Box2di & aBoxGlob
      )
 {
+    // Phase-0 timing harness: wall clock for whole box (correl+opt+sauv).
+    ElTimer aBoxWallChrono;
 
     std::cout << "DO ONE BLOC " << aBoxOut._p0 << " " << aBoxOut._p1 << " " << aBoxIn._p0  << " MATP " << mCurEtape->MATP() << "\n";
    //  mStatN =0;
@@ -942,8 +985,26 @@ void cAppliMICMAC::DoOneBloc
 
              <<"\n";
     }
-  
-	
+
+    // Timing harness markers (parseable by scripts/gpu_instream_golden.py).
+    {
+        const double aBoxWall = aBoxWallChrono.uval();
+        GPGPU_DIAG_MIN(
+            "[GPGPU][TIMING] box=%d wall=%.3fs correl=%.3fs optim=%.3fs "
+            "out=[%d,%d]-[%d,%d] pid=%d\n",
+            mKBox + 1,
+            aBoxWall,
+            aTimeCorrel,
+            aTimeOptim,
+            aBoxOut._p0.x, aBoxOut._p0.y,
+            aBoxOut._p1.x, aBoxOut._p1.y,
+#if CUDA_ENABLED
+            gpgpu_pipeline::SelfPid()
+#else
+            0
+#endif
+        );
+    }
 
     //  delete mStatN;
     delete mStatGlob;
