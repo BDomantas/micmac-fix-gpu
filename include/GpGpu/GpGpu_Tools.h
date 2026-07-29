@@ -262,7 +262,7 @@ void GpGpuTools::OutputValue( float value, uint offset, float defaut, float fact
     else if (outO == 8*defaut)
         std::cout << S1 << "?" << S2;
     else if (outO == 9*defaut)
-        std::cout << S1 << "¤" << S2;
+        std::cout << S1 << "*" << S2;
     else if ( outO < 0.0f)
         std::cout << out << ES;
     else

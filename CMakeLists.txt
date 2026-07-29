@@ -625,7 +625,7 @@ if(CMAKE_COMPILER_IS_GNUCC)
 	#~ add_compile_options(-O2 -Wall -fPIC) // pas gere par le cmake de la forge
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fPIC")
 if (${WERROR})
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -Wall -fPIC -Werror -Wno-error=overloaded-virtual -Wno-error=unused-result -Wno-error=stringop-overflow")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -Wall -fPIC -Werror -Wno-error=overloaded-virtual -Wno-error=unused-result -Wno-error=stringop-overflow -Wno-error=deprecated-declarations") # RUNPOD CUDA 11.8 LEGACY API COMPAT
 else ()
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -Wall -fPIC")
 endif()

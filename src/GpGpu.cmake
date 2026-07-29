@@ -24,6 +24,11 @@ if(MSVC12 OR MSVC11 OR MSVC10 OR MSVC90 OR MSVC80)
     set(ENV{PATH} "${VS_DIR}\\VC\\bin;C:\\Windows\\System32;${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}\\CMakeTmp\\")
 endif() 
 
+# RUNPOD MODERN CUDA ARCH OVERRIDE
+if(DEFINED MICMAC_CUDA_ARCH AND NOT "${MICMAC_CUDA_ARCH}" STREQUAL "")
+ set(_resultNVCC 0)
+ set(_outNVCC "override")
+else()
 # verif if FoundCapa.exe exists --
 if(EXISTS "${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/CMakeTmp/FoundCapa.exe")
     # run FoundCapa.exe windows
@@ -82,6 +87,24 @@ if(NOT _resultNVCC EQUAL 0)
 	endif()  
 endif()
 
+endif()
+
+# RUNPOD MODERN CUDA ARCH OVERRIDE
+if(DEFINED MICMAC_CUDA_ARCH AND NOT "${MICMAC_CUDA_ARCH}" STREQUAL "")
+ set(cuda_arch_version "${MICMAC_CUDA_ARCH}")
+ if("${MICMAC_CUDA_ARCH}" STREQUAL "89")
+  set(cuda_arch_version_string "8.9")
+  set(cuda_generation "Ada")
+ elseif("${MICMAC_CUDA_ARCH}" STREQUAL "86")
+  set(cuda_arch_version_string "8.6")
+  set(cuda_generation "Ampere")
+ elseif("${MICMAC_CUDA_ARCH}" STREQUAL "80")
+  set(cuda_arch_version_string "8.0")
+  set(cuda_generation "Ampere")
+ else()
+  message(FATAL_ERROR "Unsupported MICMAC_CUDA_ARCH=${MICMAC_CUDA_ARCH}")
+ endif()
+else()
 set(_cudaArch "${_outNVCC}")
 
 string(FIND "${_cudaArch}" "2.1" arch_21)
@@ -130,6 +153,8 @@ elseif((NOT ${arch_50} LESS 0))
 else()
 
     message("Cuda capabilities are not sufficient")
+
+endif()
 
 endif()
 
