@@ -15,6 +15,10 @@
 
 static __constant__ invParamCorrel  invPc;
 
+/// Phase C invPc model: host→__constant__ upload.
+/// Pipeline path uses default stream order before enqueueing correl kernels on
+/// work streams; full stream-ordered async would require cudaMemcpyToSymbolAsync
+/// + event wait on each work stream (future refinement). Params rarely change mid-box.
 extern "C" void CopyParamInvTodevice( pCorGpu param )
 {
   checkCudaErrors(cudaMemcpyToSymbol(invPc, &param.invPC, sizeof(invParamCorrel)));

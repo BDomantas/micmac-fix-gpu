@@ -45,6 +45,8 @@ public:
     void							initialize(int NRows, int NLines, int NBands, const T& defaultValue);
     ///\brief Modifier la taille du buffer: attention les donnees ne sont pas reinitialisee
     void							initialize(int NRows, int NLines, int NBands);
+    ///\brief Alias used by ServiceGeoSud (cols, lines); 1 band
+    void							Size(int nCols, int nLines) { initialize(nCols, nLines, 1); }
     
     ///ACCES A LA STRUCTURE MEMOIRE
     ///\brief Pointeur vers le debut du bloc memoire
