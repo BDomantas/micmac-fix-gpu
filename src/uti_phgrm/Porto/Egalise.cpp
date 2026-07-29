@@ -49,9 +49,15 @@ Header-MicMac-eLiSe-25/06/2007*/
 
 void cAppli_Ortho::DoEgalise()
 {
+   ElTimer aChronoTot;
    if (mCompMesEg)
    {
+       ElTimer aChronoMes;
+       std::cout << "[Porto] Radiom: ComputeMesureEgale BEGIN (sample boxes + correl)\n";
+       fflush(stdout);
        ComputeMesureEgale();
+       std::cout << "[Porto] Radiom: ComputeMesureEgale END in " << aChronoMes.uval() << " s\n";
+       fflush(stdout);
    }
 
    if (mERPrinc==0)
@@ -68,18 +74,32 @@ void cAppli_Ortho::DoEgalise()
    }
    if (mERPhys)
    {
+      ElTimer aChronoPhys;
+      std::cout << "[Porto] Radiom: SolveSys PHYS BEGIN\n";
+      fflush(stdout);
       mERPhys->SolveSys
       (
           mSE->PdsRappelInit().Val(),
           mSE->PdsSingularite().Val()
       );
+      std::cout << "[Porto] Radiom: SolveSys PHYS END in " << aChronoPhys.uval() << " s\n";
+      fflush(stdout);
    }
-   mERPrinc->SolveSys
-   (
-       mSE->PdsRappelInit().Val(),
-       mSE->PdsSingularite().Val(),
-       mERPhys
-   );
+   {
+      ElTimer aChronoSol;
+      std::cout << "[Porto] Radiom: SolveSys PRINC BEGIN\n";
+      fflush(stdout);
+      mERPrinc->SolveSys
+      (
+          mSE->PdsRappelInit().Val(),
+          mSE->PdsSingularite().Val(),
+          mERPhys
+      );
+      std::cout << "[Porto] Radiom: SolveSys PRINC END in " << aChronoSol.uval() << " s\n";
+      fflush(stdout);
+   }
+   std::cout << "[Porto] Radiom: DoEgalise TOTAL " << aChronoTot.uval() << " s\n";
+   fflush(stdout);
 //1e-3,1e-6);
 }
 
@@ -175,16 +195,35 @@ void cAppli_Ortho::ComputeMesureEgale()
            mVAllOrhtos[aKI]->SetERIPhys(anERI);
        }
    }
-   MapBoxes(eModeCompMesSeg);
+   {
+      ElTimer aChronoBoxes;
+      std::cout << "[Porto] Radiom: MapBoxes sample BEGIN\n";
+      fflush(stdout);
+      MapBoxes(eModeCompMesSeg);
+      std::cout << "[Porto] Radiom: MapBoxes sample END in " << aChronoBoxes.uval() << " s\n";
+      fflush(stdout);
+   }
 // std::cout << "BEGIN-XXXXX COMPUT L1 PRINC \n";
-   mERPrinc->Compute();
+   {
+      ElTimer aChronoL1;
+      std::cout << "[Porto] Radiom: L1 couple Compute PRINC BEGIN\n";
+      fflush(stdout);
+      mERPrinc->Compute();
+      std::cout << "[Porto] Radiom: L1 couple Compute PRINC END in " << aChronoL1.uval() << " s\n";
+      fflush(stdout);
+   }
 // std::cout << "END__XXXXX COMPUT L1 PRINC \n";
    mERPrinc->write(mNameFileMesEg);
 
    if (mERPhys)
    {
 // std::cout << "BEGIN-XXXXX COMPUT L1 PHYS \n";
+      ElTimer aChronoL1p;
+      std::cout << "[Porto] Radiom: L1 couple Compute PHYS BEGIN\n";
+      fflush(stdout);
       mERPhys->Compute();
+      std::cout << "[Porto] Radiom: L1 couple Compute PHYS END in " << aChronoL1p.uval() << " s\n";
+      fflush(stdout);
 // std::cout << "END__XXXXX COMPUT L1 PHYS \n";
    }
 
@@ -253,21 +292,23 @@ if (mCO.TestDiff().Val())
 
               // if (aImNadir != mVLI[aKI])
               {
-                 if (aImNadir->Im2Test() &&  mVLI[aKI]->Im2Test() && (aImNadir != mVLI[aKI]) )
-                 {
-                     double aCor = aImNadir->Correl(aP0,mVLI[aKI],mVoisCorrel,mSzVC);
+                // Single correl eval (was computed twice: debug dump + threshold).
+                if (mVLI[aKI]->ValeurPC(aP0) != 0)
+                   continue;
+                if (aImNadir == mVLI[aKI])
+                   continue;
+                double aCor = aImNadir->Correl(aP0,mVLI[aKI],mVoisCorrel,mSzVC);
+                if (aImNadir->Im2Test() &&  mVLI[aKI]->Im2Test() && mCO.TestDiff().Val())
+                {
                      std::cout << aImNadir->CurOrtho()->Name() << " " 
                                << aP0+aImNadir->DecLoc()  << " " 
                                << mVLI[aKI]->CurOrtho()->Name()  <<  " "
                                << aP0+mVLI[aKI]->DecLoc()  << " " 
                                << mVLI[aKI]->ValeurPC(aP0) << " "
                                << aCor <<  " " << mSeuilCorrel <<  "\n";
-                 }
+                }
 
-                if (
-                         (mVLI[aKI]->ValeurPC(aP0) == 0)
-                      && (aImNadir->Correl(aP0,mVLI[aKI],mVoisCorrel,mSzVC) > mSeuilCorrel)
-                   )
+                if (aCor > mSeuilCorrel)
                 {
                    aVOrd.push_back(Pt2di(aKI,NRrandom3(1000000)));
                    for (int aDx=-aSzV; aDx<=aSzV ; aDx++)

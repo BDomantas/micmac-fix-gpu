@@ -305,6 +305,8 @@ class cElemGrapheIm
      public :
           cElemGrapheIm();
           void AddPt(const Pt2df & aP1,const Pt2df & aP2 );
+          /// Cache homologous mesure pair so L1 solve need not rescan all mesures (O(mes)→O(1) per pair).
+          void AddMesPair(const cER_MesureOneIm * aM1,const cER_MesureOneIm * aM2);
           inline const int Nb() const;
           inline const Pt2df & PMin() const;
           inline const Pt2df & PMax() const;
@@ -322,6 +324,10 @@ class cElemGrapheIm
 
           void  SetParamL1(double aK0,double aKx,double aKy);
 
+          const std::vector<std::pair<const cER_MesureOneIm *,const cER_MesureOneIm *> > & MesPairs() const
+          {
+               return mMesPairs;
+          }
 
           
      private :
@@ -337,6 +343,7 @@ class cElemGrapheIm
            double         mKx;
            double         mKy;
            cElHomographie mHom;
+           std::vector<std::pair<const cER_MesureOneIm *,const cER_MesureOneIm *> > mMesPairs;
 };
 
 /*

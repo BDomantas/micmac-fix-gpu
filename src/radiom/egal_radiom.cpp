@@ -41,8 +41,16 @@ Header-MicMac-eLiSe-25/06/2007*/
 #include "StdAfx.h"
 #include "ext_stl/numeric.h"
 
+#include <atomic>
+#include <cstdlib>
+#include <mutex>
+#include <thread>
+#include <utility>
+#include <vector>
 
-static bool Debug = true;
+
+// Verbose radiom dumps; leave off for production (was hard-coded true and spammed I/O).
+static bool Debug = false;
 
 
 void AssertNoNan(const double&  x,const int & aLine,const std::string & aFile)
@@ -83,6 +91,11 @@ void cElemGrapheIm::AddPt(const Pt2df & aPt1,const Pt2df & aPt2)
     mPMin.SetInf(aPt1);
     mPMax.SetSup(aPt1);
     mInert1.add_pt_en_place(aPt1.x,aPt1.y);
+}
+
+void cElemGrapheIm::AddMesPair(const cER_MesureOneIm * aM1,const cER_MesureOneIm * aM2)
+{
+    mMesPairs.push_back(std::make_pair(aM1,aM2));
 }
 
 const int      cElemGrapheIm::Nb() const      {return mNb;}
@@ -1129,7 +1142,10 @@ void cER_Global::DoComputeL1Cple()
                     ElSwap(aM1,aM2);
                  }
                  Pt2di anInd(aM1->KIm(),aM2->KIm());
-                 mGrIm[anInd].AddPt(aM1->Pt(),aM2->Pt());
+                 cElemGrapheIm & aGr = mGrIm[anInd];
+                 aGr.AddPt(aM1->Pt(),aM2->Pt());
+                 // Keep pair pointers — avoids O(|mes|) rescan per image couple later.
+                 aGr.AddMesPair(aM1,aM2);
             }
         }
    }
@@ -1137,8 +1153,17 @@ void cER_Global::DoComputeL1Cple()
 
    mNbCplOk = 0;
    mPdsTot = 0;
-   
-   int aNbRest = (int)mGrIm.size();
+
+   // Build job list first (filter), then solve couples. Couples are independent → multi-thread.
+   struct cL1Job
+   {
+       cER_OneIm *     mI1;
+       cER_OneIm *     mI2;
+       cElemGrapheIm * mCpl;
+   };
+   std::vector<cL1Job> aJobs;
+   aJobs.reserve(mGrIm.size());
+
    for (std::map<Pt2di,cElemGrapheIm>::iterator itD =mGrIm.begin(); itD!=mGrIm.end() ; itD++)
    {
        cER_OneIm * aI1 = mVecIm[itD->first.x];
@@ -1152,15 +1177,81 @@ void cER_Global::DoComputeL1Cple()
 
        Pt2di aSzIm = Sup(aI1->SzIm(),aI2->SzIm());
 
-       // std::cout << " HHHH " << aNb << " " << (aSz.x>0.05*aSzIm.x) << " " << ( aSz.y>0.05*aSzIm.y)  << "\n";
-       // if ((aNb > 200) && (aSz.x>0.1*aSzIm.x) && ( aSz.y>0.1*aSzIm.y))
        if ((aNb > 10) && (aSz.x>0.05*aSzIm.x) && ( aSz.y>0.05*aSzIm.y))
        {
-          DoComputeL1Cple(aI1,aI2,aCpl);
+          cL1Job aJ;
+          aJ.mI1 = aI1;
+          aJ.mI2 = aI2;
+          aJ.mCpl = &aCpl;
+          aJobs.push_back(aJ);
        }
-       aNbRest--;
-       if ((aNbRest%10) == 0)
-          std::cout <<  "     paire restante " << aNbRest << "\n";
+   }
+
+   std::cout << "     L1 couples to solve: " << aJobs.size()
+             << " (of " << mGrIm.size() << " graph edges)\n";
+   fflush(stdout);
+
+   int aNbWorkers = 1;
+   {
+       const char * aEnv = getenv("MICMAC_PORTO_NBPROC");
+       if (aEnv && aEnv[0])
+       {
+           int aN = atoi(aEnv);
+           if (aN > 1) aNbWorkers = aN;
+       }
+   }
+   if (aNbWorkers > (int)aJobs.size())
+       aNbWorkers = ElMax(1,(int)aJobs.size());
+
+#if (__cplusplus > 199711L) || defined(CPP11_THREAD)
+   if (aNbWorkers > 1)
+   {
+       std::cout << "     L1 couples parallel workers=" << aNbWorkers << "\n";
+       fflush(stdout);
+       std::atomic<size_t> aNext(0);
+       std::mutex aAggMtx;
+       std::vector<std::thread> aTh;
+       aTh.reserve(aNbWorkers);
+       for (int aW = 0; aW < aNbWorkers; aW++)
+       {
+           aTh.emplace_back(
+               [&]()
+               {
+                   double aLocPds = 0;
+                   int aLocNb = 0;
+                   for (;;)
+                   {
+                       size_t aI = aNext.fetch_add(1);
+                       if (aI >= aJobs.size())
+                           break;
+                       DoComputeL1Cple(aJobs[aI].mI1, aJobs[aI].mI2, *aJobs[aI].mCpl);
+                       aLocPds += aJobs[aI].mCpl->Nb();
+                       aLocNb++;
+                       if ((aI % 25) == 0)
+                       {
+                           std::cout << "     L1 couple progress " << aI << "/" << aJobs.size() << "\n";
+                           fflush(stdout);
+                       }
+                   }
+                   std::lock_guard<std::mutex> aLk(aAggMtx);
+                   mPdsTot += aLocPds;
+                   mNbCplOk += aLocNb;
+               });
+       }
+       for (size_t aK = 0; aK < aTh.size(); aK++)
+           aTh[aK].join();
+   }
+   else
+#endif
+   {
+       for (size_t aI = 0; aI < aJobs.size(); aI++)
+       {
+           DoComputeL1Cple(aJobs[aI].mI1, aJobs[aI].mI2, *aJobs[aI].mCpl);
+           mPdsTot += aJobs[aI].mCpl->Nb();
+           mNbCplOk++;
+           if ((aI % 10) == 0)
+              std::cout <<  "     paire restante " << (aJobs.size()-aI) << "\n";
+       }
    }
 
    //   Pour chaque image i on a une fonction Fi a trois param  Ki, Ai Bi
@@ -1408,12 +1499,10 @@ void cER_Global::TestModelL1ByCple(cER_OneIm * aI1,cER_OneIm * aI2,cElemGrapheIm
 
 void cER_Global::DoComputeL1Cple(cER_OneIm * aI1,cER_OneIm * aI2,cElemGrapheIm & aCpl)
 {
-   mPdsTot += aCpl.Nb();
-   mNbCplOk ++;
+   // Note: mPdsTot / mNbCplOk accumulated by caller (thread-safe when parallel).
    aCpl.CloseOK();
-   int aKI1 = aI1->KIm();
-   int aKI2 = aI2->KIm();
-   int aNbOk = 0;
+   (void)aI1;
+   (void)aI2;
 
    SystLinSurResolu aSys(3,aCpl.Nb());
    double aTab[3];
@@ -1421,44 +1510,19 @@ void cER_Global::DoComputeL1Cple(cER_OneIm * aI1,cER_OneIm * aI2,cElemGrapheIm &
    std::vector<const cER_MesureOneIm *> aVM1;
    std::vector<const cER_MesureOneIm *> aVM2;
 
-// bool Swap = true;
-/*
-   Pt2dr aCdg1 (MatCdg(aCpl.Inert1()));
-
-   Seg2d aSeg= seg_mean_square(aCpl.Inert1());
-   Pt2dr aU1 = aSeg.v01() ;
-   Pt2dr aU2 = aU1 * Pt2dr(0,1);
-   double aL1 = sqrt(ValQuad(aCpl.Inert1(),aU1));
-   double aL2 = sqrt(ValQuad(aCpl.Inert1(),aU2));
-*/
-
- 
-//   Pt2dr aCdg2 (MatCdg(aCpl.Inert2()));
-// if (Swap)  ElSwap(aCdg1,aCdg2);
-
    ElPackHomologue aPack;
-   for (std::list<cER_MesureNIm>::const_iterator itM= mMes.begin(); itM!=mMes.end(); itM++)
+   // Prefer cached pairs (built when graph was filled). Fallback: full mesure scan (legacy).
+   const std::vector<std::pair<const cER_MesureOneIm *,const cER_MesureOneIm *> > & aPairs = aCpl.MesPairs();
+   if (!aPairs.empty())
    {
-        const cER_MesureNIm & aMN =  *itM;
-        int aNbM = aMN.NbMes();
- 
-        const cER_MesureOneIm * aM1 = 0;
-        const cER_MesureOneIm * aM2 = 0;
-        for (int aKM=0 ; aKM<aNbM ; aKM++)
-        {
-            const cER_MesureOneIm * aM = & (aMN.KthMes(aKM));
-            if (aM->KIm() == aKI1)
-               aM1 = aM;
-            if (aM->KIm() == aKI2)
-               aM2 = aM;
-        }
-        if (aM1 && aM2)
-        {
-// if (Swap) ElSwap(aM1,aM2);
-            //  R1 (K0 + K1 P1.x + K2 P2.y) = R2
+       aVM1.reserve(aPairs.size());
+       aVM2.reserve(aPairs.size());
+       for (size_t aK = 0; aK < aPairs.size(); aK++)
+       {
+            const cER_MesureOneIm * aM1 = aPairs[aK].first;
+            const cER_MesureOneIm * aM2 = aPairs[aK].second;
             aVM1.push_back(aM1);
             aVM2.push_back(aM2);
-            aNbOk++;
             double aR1 = aM1->SomVal();
             Pt2dr  aP1 = aM1->RPt() ;
             double aR2 = aM2->SomVal();
@@ -1469,7 +1533,43 @@ void cER_Global::DoComputeL1Cple(cER_OneIm * aI1,cER_OneIm * aI2,cElemGrapheIm &
 
             aSys.PushEquation(aTab,aR2,1.0);
             aPack.Cple_Add(ElCplePtsHomologues(aM1->RPt(),aM2->RPt()));
-        }
+       }
+   }
+   else
+   {
+       int aKI1 = aI1->KIm();
+       int aKI2 = aI2->KIm();
+       for (std::list<cER_MesureNIm>::const_iterator itM= mMes.begin(); itM!=mMes.end(); itM++)
+       {
+            const cER_MesureNIm & aMN =  *itM;
+            int aNbM = aMN.NbMes();
+     
+            const cER_MesureOneIm * aM1 = 0;
+            const cER_MesureOneIm * aM2 = 0;
+            for (int aKM=0 ; aKM<aNbM ; aKM++)
+            {
+                const cER_MesureOneIm * aM = & (aMN.KthMes(aKM));
+                if (aM->KIm() == aKI1)
+                   aM1 = aM;
+                if (aM->KIm() == aKI2)
+                   aM2 = aM;
+            }
+            if (aM1 && aM2)
+            {
+                aVM1.push_back(aM1);
+                aVM2.push_back(aM2);
+                double aR1 = aM1->SomVal();
+                Pt2dr  aP1 = aM1->RPt() ;
+                double aR2 = aM2->SomVal();
+
+                aTab[0] =   aR1;
+                aTab[1] =   aR1 * aP1.x;
+                aTab[2] =   aR1 * aP1.y;
+
+                aSys.PushEquation(aTab,aR2,1.0);
+                aPack.Cple_Add(ElCplePtsHomologues(aM1->RPt(),aM2->RPt()));
+            }
+       }
    }
    aCpl.SetPackHom(aPack);
    Im1D_REAL8  aSol = aSys.L1Solve();
@@ -1489,7 +1589,6 @@ void cER_Global::DoComputeL1Cple(cER_OneIm * aI1,cER_OneIm * aI2,cElemGrapheIm &
 
        double aDif = aR2 - aR1 * aCpl.FactCorrec1to2(aP1);
        aVDif.push_back(ElAbs(aDif));
-       // std::cout << "DIF " << aDif << " " << aR1 << " " << aR2 << "\n";
    }
 
    std::sort(aVDif.begin(),aVDif.end());
@@ -2054,7 +2153,7 @@ void cER_Global::Show1() const
 
 /*Footer-MicMac-eLiSe-25/06/2007
 
-Ce logiciel est un programme informatique servant �  la mise en
+Ce logiciel est un programme informatique servant �  la mise en
 correspondances d'images pour la reconstruction du relief.
 
 Ce logiciel est régi par la licence CeCILL-B soumise au droit français et
@@ -2070,17 +2169,17 @@ seule une responsabilité restreinte pèse sur l'auteur du programme,  le
 titulaire des droits patrimoniaux et les concédants successifs.
 
 A cet égard  l'attention de l'utilisateur est attirée sur les risques
-associés au chargement,  �  l'utilisation,  �  la modification et/ou au
-développement et �  la reproduction du logiciel par l'utilisateur étant 
-donné sa spécificité de logiciel libre, qui peut le rendre complexe �  
-manipuler et qui le réserve donc �  des développeurs et des professionnels
+associés au chargement,  �  l'utilisation,  �  la modification et/ou au
+développement et �  la reproduction du logiciel par l'utilisateur étant 
+donné sa spécificité de logiciel libre, qui peut le rendre complexe �  
+manipuler et qui le réserve donc �  des développeurs et des professionnels
 avertis possédant  des  connaissances  informatiques approfondies.  Les
-utilisateurs sont donc invités �  charger  et  tester  l'adéquation  du
-logiciel �  leurs besoins dans des conditions permettant d'assurer la
+utilisateurs sont donc invités �  charger  et  tester  l'adéquation  du
+logiciel �  leurs besoins dans des conditions permettant d'assurer la
 sécurité de leurs systèmes et ou de leurs données et, plus généralement, 
-�  l'utiliser et l'exploiter dans les mêmes conditions de sécurité. 
+�  l'utiliser et l'exploiter dans les mêmes conditions de sécurité. 
 
-Le fait que vous puissiez accéder �  cet en-tête signifie que vous avez 
+Le fait que vous puissiez accéder �  cet en-tête signifie que vous avez 
 pris connaissance de la licence CeCILL-B, et que vous en avez accepté les
 termes.
 Footer-MicMac-eLiSe-25/06/2007*/
