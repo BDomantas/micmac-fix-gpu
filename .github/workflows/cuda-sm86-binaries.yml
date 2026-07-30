@@ -1,8 +1,7 @@
 # Per-SM binaries + fat binary + publish (artifacts, Release, GHCR).
 #
-# CUDA 11.8 devel: legacy textureReference API still works (MicMac requirement).
-# Fat default SMs: 80 (A100) + 86 (A4500) + 89 (L40S / Ada workstation).
-# sm_120 (RTX 5090 / Blackwell) needs CUDA 12 + texture-ref port — not in this fat yet.
+# CUDA 12.8 devel: MicMac ported to cudaTextureObject_t (no textureReference).
+# Fat default SMs: 80 (A100) + 86 + 89 (Ada) + 120 (Blackwell / RTX 5090).
 #
 # Compile-only on GHA (no GPU). Runtime needs NVIDIA driver on target host.
 
@@ -22,7 +21,7 @@ on:
       cuda_archs:
         description: "SMs for per-SM matrix AND fat (comma-separated)"
         type: string
-        default: "80,86,89"
+        default: "80,86,89,120"
       build_singles:
         description: "Build separate per-SM packages"
         type: boolean
@@ -61,7 +60,7 @@ jobs:
         id: set
         shell: bash
         env:
-          ARCHS_IN: ${{ github.event.inputs.cuda_archs || '80,86,89' }}
+          ARCHS_IN: ${{ github.event.inputs.cuda_archs || '80,86,89,120' }}
         run: |
           set -euo pipefail
           ARCHS=$(echo "$ARCHS_IN" | tr ',;/' ' ' | xargs)
@@ -81,7 +80,7 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     container:
-      image: nvidia/cuda:11.8.0-devel-ubuntu22.04
+      image: nvidia/cuda:12.8.0-devel-ubuntu22.04
     defaults:
       run:
         shell: bash
@@ -137,7 +136,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 360
     container:
-      image: nvidia/cuda:11.8.0-devel-ubuntu22.04
+      image: nvidia/cuda:12.8.0-devel-ubuntu22.04
     defaults:
       run:
         shell: bash
@@ -225,11 +224,14 @@ jobs:
             | sm_80 | A100 |
             | sm_86 | A4500 / Ampere pro |
             | sm_89 | L40S, RTX 5000 Ada, RTX 5880 Ada, RTX PRO 5000 Ada |
+| sm_120 | RTX 5090 / Blackwell |
 
             ### Fat
-            One binary with **sm_80 + sm_86 + sm_89** (CUDA 11.8).
+            One binary with **sm_80 + sm_86 + sm_89 + sm_120** (CUDA 12.8, texture objects).
 
-            **Not included yet:** sm_120 (RTX 5090 / Blackwell) — needs CUDA 12 + MicMac texture-ref API port.
+            | SM | GPUs |
+            |----|------|
+            | sm_120 | RTX 5090 / Blackwell |
 
             Multi-GPU (2× cards): one process per GPU (`CUDA_VISIBLE_DEVICES`).
           files: artifacts/**

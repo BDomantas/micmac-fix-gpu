@@ -6,6 +6,7 @@
 #include "GpGpu/GpGpu.h"
 #include "GpGpu/GpGpu_Data.h"
 #include "GpGpu/GpGpu_MultiThreadingCpu.h"
+#include <cuda_runtime.h>
 #include <string>
 
 
@@ -18,9 +19,8 @@
 struct dataCorrelMS;
 struct const_Param_Cor_MS;
 
-extern "C" textureReference&  texture_ImageEpi(int nEpi);
-extern "C" textureReference* pTexture_ImageEpi(int nEpi);
-extern "C" textureReference* ptexture_Masq_Erod(int nEpi);
+extern "C" void setCMSTextureObjects(cudaTextureObject_t img0, cudaTextureObject_t img1,
+                                     cudaTextureObject_t mask0, cudaTextureObject_t mask1);
 extern "C" void LaunchKernelCorrelationMultiScalePreview(dataCorrelMS &data,const_Param_Cor_MS &param);
 extern "C" void paramCorMultiScale2Device( const_Param_Cor_MS &param );
 extern "C" void LaunchKernel__Correlation_MultiScale(dataCorrelMS &data, const_Param_Cor_MS &parCMS);
@@ -89,7 +89,7 @@ struct const_Param_Cor_MS
 
 	///
 	/// \brief mAhDefCost
-	/// Cout intrinsèque par défaut
+	/// Cout intrinsï¿½que par dï¿½faut
     float   mAhDefCost;
 
 	///
@@ -119,7 +119,7 @@ struct const_Param_Cor_MS
 
 	///
 	/// \brief mDyRegGpu
-	/// Indique si la régularisation est aussi calculer par gpugpu
+	/// Indique si la rï¿½gularisation est aussi calculer par gpugpu
 	bool	mDyRegGpu;
 
     ///
@@ -138,7 +138,7 @@ struct const_Param_Cor_MS
     uint3   mDim3Cache;
 
 	///
-	/// \brief init Initialidation des paramètres
+	/// \brief init Initialidation des paramï¿½tres
 	/// \param aVV
 	/// \param aVPds
 	/// \param offset0
@@ -182,7 +182,7 @@ struct const_Param_Cor_MS
 
 	///
 	/// \brief dealloc
-	/// Désallocation de la mémoire
+	/// Dï¿½sallocation de la mï¿½moire
     void dealloc();
 
 };
@@ -244,27 +244,21 @@ struct dataCorrelMS
 
 	///
 	/// \brief _dt_MaskErod
-	/// Texture du masque erodée
+	/// Texture du masque erodï¿½e
     ImageGpGpu<pixel,cudaContext>           _dt_MaskErod[NBEPIIMAGE];
 	///
 	/// \brief _dt_Image
-	/// Groupe de textures des images épipolaries
+	/// Groupe de textures des images ï¿½pipolaries
     ImageLayeredGpGpu<float,cudaContext>    _dt_Image[NBEPIIMAGE];
 
-	///
-	/// \brief _texImage
-	/// Rédérence sur les textures d'images
-    textureReference*           _texImage[NBEPIIMAGE];
-
-	///
-	/// \brief _texMaskErod
-	/// Références sur les textures des masques érodées
-    textureReference*           _texMaskErod[NBEPIIMAGE];
+	/// CUDA 12: texture objects for epi images / eroded masks (no textureReference).
+	cudaTextureObject_t         _texObjImage[NBEPIIMAGE];
+	cudaTextureObject_t         _texObjMaskErod[NBEPIIMAGE];
 
 	///
 	/// \brief transfertImage Transfert des images de l'hote vers le device
 	/// \param sizeImage taille des images
-	/// \param dataImage Pointeur sur les données des images dans l'hote
+	/// \param dataImage Pointeur sur les donnï¿½es des images dans l'hote
 	/// \param id
 	///
     void    transfertImage(uint2 sizeImage, float ***dataImage , int id);
@@ -274,8 +268,8 @@ struct dataCorrelMS
 	/// \brief transfertMask Transfert des masques de l'hote vers le device
 	/// \param dimMask0 taille du masque 0
 	/// \param dimMask1 taille du masque 1
-	/// \param mImMasqErod_0 Pointeur source des données du masque 0
-	/// \param mImMasqErod_1 Pointeur source des données du masque 1
+	/// \param mImMasqErod_0 Pointeur source des donnï¿½es du masque 0
+	/// \param mImMasqErod_1 Pointeur source des donnï¿½es du masque 1
 	///
 	void    transfertMask(uint2 dimMask0, uint2 dimMask1, pixel **mImMasqErod_0, pixel **mImMasqErod_1);
 
@@ -293,13 +287,13 @@ struct dataCorrelMS
 
 	///
 	/// \brief syncDeviceData
-	/// Synchronisation des données entre hote et device
+	/// Synchronisation des donnï¿½es entre hote et device
     void    syncDeviceData();
 
 
 	///
 	/// \brief dealloc
-	/// Désallocation de la mémoire hote et device
+	/// Dï¿½sallocation de la mï¿½moire hote et device
     void    dealloc();
 
 	///
@@ -327,7 +321,7 @@ private:
 
 ///
 /// \brief The GpGpu_Interface_Cor_MS class
-/// Classe de gestion des processus pour le lancement de calcul GPGPU pour la corrélation multiscale
+/// Classe de gestion des processus pour le lancement de calcul GPGPU pour la corrï¿½lation multiscale
 class GpGpu_Interface_Cor_MS : public CSimpleJobCpuGpu< bool>
 {
 public:
@@ -342,7 +336,7 @@ public:
 
 	///
 	/// \brief Job_Correlation_MultiScale
-	/// Lancer une correlation par pair en géométrie épipolaire
+	/// Lancer une correlation par pair en gï¿½omï¿½trie ï¿½pipolaire
     void            Job_Correlation_MultiScale();
 
 	///
@@ -363,7 +357,7 @@ public:
 			pixel **mask1);
 
 	///
-	/// \brief init Initialisation des paramètres
+	/// \brief init Initialisation des paramï¿½tres
 	/// \param terrain
 	/// \param aVV
 	/// \param aVPds
@@ -422,12 +416,12 @@ public:
 	///
 	T* getCost(uint2 pt);
 
-	/// Désallocation de la mémoire
+	/// Dï¿½sallocation de la mï¿½moire
     void dealloc();
 
 	///
 	/// \brief param
-	/// \return Les paramètres de corrélation
+	/// \return Les paramï¿½tres de corrï¿½lation
 	///
 	const_Param_Cor_MS& param(){return _cDataCMS;}
 

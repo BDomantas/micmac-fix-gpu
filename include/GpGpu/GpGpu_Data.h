@@ -1180,26 +1180,10 @@ class DecoratorImage<cudaContext> : public CData3D<cudaArray>
 {
 public:
 
-    /// \brief  Lie l image a une texture Gpu
-    /// \param  texRef : reference de la texture a lier
-    bool		bindTexture(textureReference& texRef)
+    /// CUDA 12+: texture references removed. Bind is a no-op; callers create
+    /// cudaTextureObject_t from GetCudaArray() (see SData2Correl / CMS).
+    bool        UnbindDealloc()
     {
-        _textureReference = &texRef;
-
-        cudaChannelFormatDesc desc;
-
-        bool bCha	= !cudaGetChannelDesc(&desc, GetCudaArray());
-        bool bBind	= !cudaBindTextureToArray(&texRef,GetCudaArray(),&desc);
-
-        return bCha && bBind;
-    }
-
-    bool        UnbindDealloc(){
-
-        if(_textureReference) cudaUnbindTexture(_textureReference);
-
-        _textureReference = NULL;
-
         return CData3D<cudaArray>::Dealloc();
     }
 
@@ -1230,10 +1214,6 @@ protected:
         struct2D::SetMaxDimension();
         return (cudaFreeArray( GetCudaArray()) == cudaSuccess) ? true : false;
     }
-
-private:
-
-    textureReference*   _textureReference;
 
 };
 
@@ -1314,18 +1294,13 @@ public:
     }
 
 	///
-	/// \brief syncDevice Copier les donn�es de l'hote vers le device
-	/// \param hostData Pointeur source
-	/// \param texture Texture destinataire
-	/// \return
+	/// \brief syncDevice Copier les donnees de l'hote vers le device (CUDA array only).
+	/// Texture objects are created by the owner after this call.
 	///
-    bool    syncDevice(CuHostData3D<T> &hostData,textureReference&  texture)
+    bool    syncDevice(CuHostData3D<T> &hostData)
     {
         CData3D::ReallocIfDim(hostData.GetDimension(),1);
-        bool resultSync = copyHostToDevice(hostData.pData());
-        bindTexture(texture);
-
-        return resultSync;
+        return copyHostToDevice(hostData.pData());
     }
 
 protected:
@@ -1459,18 +1434,13 @@ public:
 
 
 	///
-	/// \brief syncDevice Copier les donn�es de l'hote vers le device
-	/// \param hostData Pointeur source
-	/// \param texture Texture destinataire
-	/// \return
+	/// \brief syncDevice Copier les donnees de l'hote vers le device (CUDA array only).
+	/// Texture objects are created by the owner after this call.
 	///
-    bool    syncDevice(CuHostData3D<T> &hostData,textureReference&  texture)
+    bool    syncDevice(CuHostData3D<T> &hostData)
     {
         CData3D::ReallocIfDim(hostData.GetDimension(),hostData.GetNbLayer());
-        bool resultSync = copyHostToDevice(hostData.pData());
-        bindTexture(texture);
-
-        return resultSync;
+        return copyHostToDevice(hostData.pData());
     }
 
 protected:

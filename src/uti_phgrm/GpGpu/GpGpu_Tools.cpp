@@ -1,11 +1,9 @@
 #include "GpGpu/GpGpu_Tools.h"
 
-void GpGpuTools::SetParamterTexture(textureReference &textRef)
+void GpGpuTools::SetParamterTexture()
 {
-    textRef.addressMode[0]	= cudaAddressModeBorder;
-    textRef.addressMode[1]	= cudaAddressModeBorder;
-    textRef.filterMode		= cudaFilterModeLinear; //cudaFilterModePoint cudaFilterModeLinear
-    textRef.normalized		= false;
+    // CUDA 12: texture references removed; filter/address modes live on
+    // cudaTextureDesc when creating cudaTextureObject_t.
 }
 
 std::string GpGpuTools::GetImagesFolder()

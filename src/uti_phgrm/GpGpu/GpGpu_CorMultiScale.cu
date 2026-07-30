@@ -6,17 +6,17 @@
 
 // Algorithme Correlation multi echelle sur ligne epipolaire
 
-// Données :
-//  - 2 images avec différents niveaux de floutage
+// Donnï¿½es :
+//  - 2 images avec diffï¿½rents niveaux de floutage
 
 //
-// * Pré-calcul et paramètres                                   |       GPU
+// * Prï¿½-calcul et paramï¿½tres                                   |       GPU
 // -------------------------------------------------------------|----------------------------------
 // - Tableau de parcours des vignettes                          >>      constant 3d data short2
 // - poids des echelles                                         >>      constant 2d data ???
-// - Tableau du ZMin et ZMax de chaque coordonnées terrain      >>      global 2D data short2
+// - Tableau du ZMin et ZMax de chaque coordonnï¿½es terrain      >>      global 2D data short2
 // - les offsets Terrain <--> Image Epi                         >>      constant 2 x int2
-// - le masque erodé de l'image 1                               >>      1 texture pixel
+// - le masque erodï¿½ de l'image 1                               >>      1 texture pixel
 // - 2 images x N echelles                                      >>      2 textures layered float
 
 
@@ -27,11 +27,11 @@
 /*  CPU
  *
  *  pour chaque
- *      - calcul des images interpolées pour l'image 1
- *      - mise en vecteur des images interpolées
+ *      - calcul des images interpolï¿½es pour l'image 1
+ *      - mise en vecteur des images interpolï¿½es
  *      - Precalcul somme et somme quad
  *      - Parcour du terrain
- *      - Calcul des images interpolé
+ *      - Calcul des images interpolï¿½
  *      - Parcours des Z
  *          - Calcul de la projection image 1
  *          - Calcul de la correlation Quick_MS_CorrelBasic_Center
@@ -53,16 +53,18 @@ extern "C" void paramCorMultiScale2Device( const_Param_Cor_MS &param )
     checkCudaErrors(cudaMemcpyToSymbol(cstPCMS, &param, sizeof(const_Param_Cor_MS)));
 }
 
-texture< float,	cudaTextureType2DLayered >      texture_ImageEpi_00;
-texture< float,	cudaTextureType2DLayered >      texture_ImageEpi_01;
-texture< pixel,	cudaTextureType2D >             Texture_Masq_Erod_00;
-texture< pixel,	cudaTextureType2D >             Texture_Masq_Erod_01;
+// CUDA 12: texture objects (set via setCMSTextureObjects before kernels).
+__device__ cudaTextureObject_t d_cms_texImage[2];
+__device__ cudaTextureObject_t d_cms_texMask[2];
 
-extern "C" textureReference& texture_ImageEpi(int nEpi){return nEpi == 0 ? texture_ImageEpi_00 : texture_ImageEpi_01;}
-
-extern "C" textureReference* pTexture_ImageEpi(int nEpi){return nEpi == 0 ? &texture_ImageEpi_00 : &texture_ImageEpi_01;}
-
-extern "C" textureReference* ptexture_Masq_Erod(int nEpi){return nEpi == 0 ? &Texture_Masq_Erod_00 : &Texture_Masq_Erod_01;}
+extern "C" void setCMSTextureObjects(cudaTextureObject_t img0, cudaTextureObject_t img1,
+                                     cudaTextureObject_t mask0, cudaTextureObject_t mask1)
+{
+    cudaTextureObject_t imgs[2] = { img0, img1 };
+    cudaTextureObject_t masks[2] = { mask0, mask1 };
+    checkCudaErrors(cudaMemcpyToSymbol(d_cms_texImage, imgs, sizeof(imgs)));
+    checkCudaErrors(cudaMemcpyToSymbol(d_cms_texMask, masks, sizeof(masks)));
+}
 
 __device__
 inline    bool IN_THREAD(uint x = 0,uint y = 0,uint z = 0,uint bx = 0,uint by = 0,uint bz = 0)
@@ -89,27 +91,6 @@ inline    bool GET_Val_BIT(const U_INT1 * aData,int anX)
     return (aData[anX/8] >> (7-anX %8) ) & 1;
 }
 
-
-template<ushort idTexture>
-__device__
-inline    texture< pixel,cudaTextureType2D>  getMask()
-{
-	return Texture_Masq_Erod_00;
-}
-
-template<>
-__device__
-inline    texture< pixel,cudaTextureType2D>  getMask<0>()
-{
-	return Texture_Masq_Erod_00;
-}
-
-template<>
-__device__
-inline    texture< pixel,cudaTextureType2D>  getMask<1>()
-{
-	return Texture_Masq_Erod_01;
-}
 
 inline __device__ int dElise_div(int a,int b)
 {
@@ -139,50 +120,27 @@ template<ushort idTexture>
 __device__
 inline    bool IsOkErod(int2 pt)
 {
-    // TODO peut etre simplifier % et division
-
 	const uint2 size = getSizeImage<idTexture>();
 
 	const int ptxBy8 = sgpu::__div<8>(pt.x );				// pt.x >> 3 Division par 8
 	const int modulo = pt.x - (sgpu::__mult<8>(ptxBy8 ))  ;// (ptxBy8<<3) multiplication par 8
 
-	pixel mask8b = tex2D(getMask<idTexture>(),(float)(ptxBy8) + 0.5f,(float)pt.y + 0.5f);
+	pixel mask8b = tex2D<pixel>(d_cms_texMask[idTexture], (float)(ptxBy8) + 0.5f, (float)pt.y + 0.5f);
 
 	return ((mask8b >> (7-modulo ) ) & 1) && aI(pt,size);
-}
-
-template<ushort idTexture>
-__device__
-inline    texture< float,	cudaTextureType2DLayered >  getTexture()
-{
-	return idTexture == 0 ? texture_ImageEpi_00 : texture_ImageEpi_01;
-}
-
-template<>
-__device__
-inline    texture< float,	cudaTextureType2DLayered >  getTexture<0>()
-{
-	return texture_ImageEpi_00;
-}
-
-template<>
-__device__
-inline    texture< float,	cudaTextureType2DLayered >  getTexture<1>()
-{
-	return texture_ImageEpi_01;
 }
 
 template<ushort idTex>
 __device__
 inline    float getValImage(float2 pt,ushort nScale)
 {
-	return tex2DLayered(getTexture<idTex>(),pt.x + 0.5f,pt.y + 0.5f ,nScale);
+	return tex2DLayered<float>(d_cms_texImage[idTex], pt.x + 0.5f, pt.y + 0.5f, (int)nScale);
 }
 
 template<ushort idTex,class T>
 __device__ float getValImage(T pt,ushort nScale)
 {
-	return tex2DLayered(getTexture<idTex>(),(float)pt.x + 0.5f,(float)pt.y + 0.5f ,nScale);
+	return tex2DLayered<float>(d_cms_texImage[idTex], (float)pt.x + 0.5f, (float)pt.y + 0.5f, (int)nScale);
 }
 
 template<class T> inline
@@ -265,13 +223,13 @@ void KernelPrepareCorrel(float aStepPix, ushort mNbByPix, float* mSom, float* mS
 	if(oSE(ptTer,szImage))
         return;
 
-    // indice de l'etape sub pixelaire, le maximum étant cPCencus.mNbByPix
+    // indice de l'etape sub pixelaire, le maximum ï¿½tant cPCencus.mNbByPix
     const ushort    aPhase   =   (ushort)blockIdx.z;
 
-    // la dimension du cache, la cache stocke des precaluls pour la corrélation
+    // la dimension du cache, la cache stocke des precaluls pour la corrï¿½lation
 	const uint3     dimCache =   make_uint3(szImage.x,szImage.y,mNbByPix*cstPCMS.aNbScale);
 
-    // le décalage sub pixelaire
+    // le dï¿½calage sub pixelaire
     const float     cStepPix =   ((float)aPhase)*aStepPix;
 
     // point de l'image pour cette etape sub pixelaire
@@ -290,7 +248,7 @@ void KernelPrepareCorrel(float aStepPix, ushort mNbByPix, float* mSom, float* mS
 		const ushort  aNbP    = cstPCMS.size_aVV[aKS];
 		const float   aPdsK   = cstPCMS.aVPds[aKS];
 
-        // pour les éléments de la vignettes
+        // pour les ï¿½lï¿½ments de la vignettes
         for (int aKP=0 ; aKP<aNbP ; aKP++)
         {
 			const float	 aV = getValImage<idTex>(ptImage+aVP[aKP],aKS);
@@ -300,7 +258,7 @@ void KernelPrepareCorrel(float aStepPix, ushort mNbByPix, float* mSom, float* mS
 
         aGlobSom    += aSom     * aPdsK;
         aGlobSomSqr += aSomSqr  * aPdsK;
-		aGlobPds    += aPdsK    * aNbP; // TODO peut etre précalculer
+		aGlobPds    += aPdsK    * aNbP; // TODO peut etre prï¿½calculer
 
         // indice dans le cache
 		const uint3     p3d        =   make_uint3(ptTer.x,ptTer.y,aPhase*mNbByPix + aKS);
@@ -429,7 +387,7 @@ void Kernel__DoCorrel_MultiScale_Global(float* aSom1,float*  aSom11,float* aSom2
         // Attention probleme avec valeur negative et le modulo
         const ushort aPhase = (ushort)((abs((int)aZ))%cstPCMS.mNbByPix);
 
-		const int anOffset  = dElise_div((int)aZ,cstPCMS.mNbByPix); // TODO peut etre simplifier avec l'opération précédente
+		const int anOffset  = dElise_div((int)aZ,cstPCMS.mNbByPix); // TODO peut etre simplifier avec l'opï¿½ration prï¿½cï¿½dente
 
         const   int2    aIm1SsPx   =   an + cstPCMS.anOff1;
         //      pt int dans l'image 1
@@ -503,8 +461,8 @@ extern "C" void LaunchKernel__Correlation_MultiScale(dataCorrelMS &data,const_Pa
 	const dim3	blocks_00(divDTerX0,divDTerY0, 1);
 	const dim3	blocks_01(divDTerX1,divDTerY1, parCMS.mNbByPix);
 
-    /// Les données sont structurées par calques
-    /// les echelles (du même subpixel) sont regroupées par calques consécutifs
+    /// Les donnï¿½es sont structurï¿½es par calques
+    /// les echelles (du mï¿½me subpixel) sont regroupï¿½es par calques consï¿½cutifs
 	KernelPrepareCorrel<0><<<blocks_00,threads>>>(1,1,aSom_0.pData(),aSomSqr_0.pData());
 
     getLastCudaError("KernelPrepareCorrel 0");

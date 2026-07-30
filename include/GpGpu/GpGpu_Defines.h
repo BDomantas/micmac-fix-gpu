@@ -37,7 +37,7 @@ typedef unsigned char pixel;
 #define eAVANT      true
 #define eARRIERE    false
 
-#define TexFloat2Layered texture<float2,cudaTextureType2DLayered>
+// CUDA 12: texture<> / textureReference removed. Use cudaTextureObject_t only.
 #define TEMPLATE_D2OPTI template<template<class T> class U, uint NBUFFER >
 
 #define HOST_Data2Opti Data2Optimiz<CuHostData3D,2>

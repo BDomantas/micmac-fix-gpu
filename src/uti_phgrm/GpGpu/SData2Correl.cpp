@@ -1,11 +1,6 @@
 #include "GpGpu/SData2Correl.h"
 
 SData2Correl::SData2Correl():
-    _texMaskGlobal(getMaskGlobal()),
-    _TexMaskImages(getTexL_MaskImages()),
-    _texImages(getImage()),
-    _texProjections_00(getProjection(0)),
-    _texProjections_01(getProjection(1)),
     _texObjImages(0),
     _texObjMaskImages(0),
     _texObjMaskGlobal(0),
@@ -22,22 +17,8 @@ SData2Correl::SData2Correl():
 
     for (int s = 0;s<NSTREAM;s++)
     {
-        GpGpuTools::SetParamterTexture(GetTeXProjection(s));
         _texObjProj[s] = 0;
     }
-
-    GpGpuTools::SetParamterTexture(_texImages);
-
-    _texMaskGlobal.addressMode[0]	= cudaAddressModeBorder;
-    _texMaskGlobal.addressMode[1]	= cudaAddressModeBorder;
-    _texMaskGlobal.filterMode       = cudaFilterModePoint;
-    _texMaskGlobal.normalized       = false;
-
-    _TexMaskImages.addressMode[0]	= cudaAddressModeBorder;
-    _TexMaskImages.addressMode[1]	= cudaAddressModeBorder;
-    _TexMaskImages.filterMode       = cudaFilterModePoint;
-    _TexMaskImages.normalized       = false;
-
 
     for (int i = 0; i < SIZERING; ++i)
     {
@@ -110,9 +91,6 @@ void SData2Correl::DeallocHostData()
 void SData2Correl::DeallocDeviceData()
 {
     DestroyTextureObjects();
-    checkCudaErrors( cudaUnbindTexture(&_texImages) );
-    checkCudaErrors( cudaUnbindTexture(&_texMaskGlobal) );
-    checkCudaErrors( cudaUnbindTexture(&_TexMaskImages) );
 
     for (int s = 0;s<NSTREAM;s++)
     {
@@ -128,19 +106,6 @@ void SData2Correl::DeallocDeviceData()
 
 }
 
-textureReference &SData2Correl::GetTeXProjection(int TexSel)
-{
-    switch (TexSel)
-    {
-    case 0:
-        return _texProjections_00;
-    case 1:
-        return _texProjections_01;
-    default:
-        return _texProjections_00;
-    }
-}
-
 void SData2Correl::SetImages(float *dataImage, uint2 dimImage, int nbLayer)
 {
 #ifdef  NVTOOLS
@@ -148,8 +113,6 @@ void SData2Correl::SetImages(float *dataImage, uint2 dimImage, int nbLayer)
 #endif
     _dt_LayeredImages.CData3D::ReallocIfDim(dimImage,nbLayer);
     _dt_LayeredImages.copyHostToDevice(dataImage);
-    _dt_LayeredImages.bindTexture(_texImages);
-    // Phase C: rebuild image texture object after upload.
     DestroyTexObj(_texObjImages);
     _texObjImages = CreateLayeredTexObj(_dt_LayeredImages.GetCudaArray(), /*linear*/true);
 #ifdef  NVTOOLS
@@ -164,7 +127,6 @@ void SData2Correl::SetMaskImages(pixel *dataMaskImages, uint2 dimMaskImage, int 
 #endif
     _dt_LayeredMaskImages.CData3D::ReallocIfDim(dimMaskImage,nbLayer);
     _dt_LayeredMaskImages.copyHostToDevice(dataMaskImages);
-    _dt_LayeredMaskImages.bindTexture(_TexMaskImages);
     DestroyTexObj(_texObjMaskImages);
     _texObjMaskImages = CreateLayeredTexObj(_dt_LayeredMaskImages.GetCudaArray(), /*linear*/false);
 #ifdef  NVTOOLS
@@ -179,7 +141,6 @@ void SData2Correl::SetGlobalMask(pixel *dataMask, uint2 dimMask)
     #endif
     _dt_GlobalMask.DecoratorImage<cudaContext>::ReallocIfDim(dimMask,1);
     _dt_GlobalMask.copyHostToDevice(dataMask);
-    _dt_GlobalMask.bindTexture(_texMaskGlobal);
     DestroyTexObj(_texObjMaskGlobal);
     _texObjMaskGlobal = Create2DTexObj(_dt_GlobalMask.GetCudaArray(), /*linear*/false);
 	#ifdef  NVTOOLS
@@ -199,8 +160,6 @@ void SData2Correl::copyHostToDevice(pCorGpu param,uint s)
     uint projSlot = (s < (uint)SIZERING) ? s : 0;
     _dt_LayeredProjection[s].copyHostToDevice(_hVolumeProj[projSlot].pData());
 
-    _dt_LayeredProjection[s].bindTexture(GetTeXProjection(s));
-    // Phase C: per-slot projection texture object.
     DestroyTexObj(_texObjProj[s]);
     _texObjProj[s] = CreateLayeredTexObj(_dt_LayeredProjection[s].GetCudaArray(), /*linear*/true);
 	#ifdef  NVTOOLS
@@ -213,8 +172,8 @@ void SData2Correl::copyHostToDeviceASync(pCorGpu param, uint s, cudaStream_t str
     _dt_LayeredProjection[s].ReallocIfDim(param.dimSTer,param.invPC.nbImages * param.ZCInter);
     uint projSlot = (s < (uint)SIZERING) ? s : 0;
     _dt_LayeredProjection[s].copyHostToDeviceASync(_hVolumeProj[projSlot].pData(), stream);
-    // Bind is host-side; must complete before kernel that samples this slot.
-    _dt_LayeredProjection[s].bindTexture(GetTeXProjection(s));
+    // Texture object bind is host-side metadata; recreate after async H2D enqueued.
+    // Kernel must wait on stream before sampling this slot.
     DestroyTexObj(_texObjProj[s]);
     _texObjProj[s] = CreateLayeredTexObj(_dt_LayeredProjection[s].GetCudaArray(), /*linear*/true);
 }
@@ -231,7 +190,9 @@ void SData2Correl::CopyDevicetoHostASync(uint idBuf, uint s, cudaStream_t stream
 
 void SData2Correl::UnBindTextureProj(uint s)
 {
-    checkCudaErrors( cudaUnbindTexture(&(GetTeXProjection(s))));
+    // No-op: texture objects are replaced on next copyHostToDevice*;
+    // destroying here races multi-stream correl (see InterfaceCorrel).
+    (void)s;
 }
 
 void SData2Correl::ReallocConstData(uint nbImages)

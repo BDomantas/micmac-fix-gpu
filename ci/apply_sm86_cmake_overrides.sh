@@ -71,7 +71,7 @@ else()
 else:
     print("GpGpu.cmake arch override already present")
 
-compat = "RUNPOD CUDA 11.8 LEGACY API COMPAT"
+compat = "RUNPOD CUDA 12 TEXTURE OBJECT COMPAT"
 cmake = cmake_path.read_text(encoding="utf-8")
 if compat not in cmake:
     needle = '-Wno-error=stringop-overflow")'

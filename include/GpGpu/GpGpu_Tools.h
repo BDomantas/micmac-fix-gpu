@@ -22,8 +22,9 @@ public:
 
     ~GpGpuTools(){}
 
-    /// \brief          parametre texture
-    static void			SetParamterTexture(textureReference &textRef);
+    /// \brief          Legacy texture-reference setup (removed for CUDA 12).
+    /// Kept as empty no-op so call sites compile if any remain.
+    static void			SetParamterTexture();
 
     ///  \brief         Convertir array 2D en tableau lineaire
     template <class T>

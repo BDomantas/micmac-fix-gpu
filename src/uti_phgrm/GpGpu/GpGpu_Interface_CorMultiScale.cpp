@@ -1,18 +1,13 @@
 #include"GpGpu/GpGpu_Interface_CorMultiScale.h"
+#include "GpGpu/GpGpu_TextureTools.cuh"
 
 
 dataCorrelMS::dataCorrelMS()
 {
     for (int t = 0; t < NBEPIIMAGE; ++t)
     {
-        _texImage[t]    = pTexture_ImageEpi(t);
-        _texMaskErod[t] = ptexture_Masq_Erod(t);
-        GpGpuTools::SetParamterTexture(*_texImage[t]);
-
-        _texMaskErod[t]->addressMode[0]	= cudaAddressModeBorder;
-        _texMaskErod[t]->addressMode[1]	= cudaAddressModeBorder;
-        _texMaskErod[t]->filterMode     = cudaFilterModePoint; //cudaFilterModePoint cudaFilterModeLinear
-        _texMaskErod[t]->normalized     = false;
+        _texObjImage[t]    = 0;
+        _texObjMaskErod[t] = 0;
     }
 
 	_uInterval_Z.SetName("_uInterval_Z");
@@ -141,21 +136,28 @@ void dataCorrelMS::syncDeviceData()
 {
     for (int t = 0; t < NBEPIIMAGE; ++t)
     {
-        _dt_Image[t].syncDevice(_HostImage[t],*_texImage[t]);
-        _dt_MaskErod[t].syncDevice(_HostMaskErod[t],*_texMaskErod[t]);
+        _dt_Image[t].syncDevice(_HostImage[t]);
+        _dt_MaskErod[t].syncDevice(_HostMaskErod[t]);
+
+        GpGpuDestroyTexObj(_texObjImage[t]);
+        GpGpuDestroyTexObj(_texObjMaskErod[t]);
+        _texObjImage[t] = GpGpuCreateTexObj(_dt_Image[t].GetCudaArray(), /*linear*/true);
+        _texObjMaskErod[t] = GpGpuCreateTexObj(_dt_MaskErod[t].GetCudaArray(), /*linear*/false);
     }
+
+    setCMSTextureObjects(_texObjImage[0], _texObjImage[1],
+                        _texObjMaskErod[0], _texObjMaskErod[1]);
 
     _uInterval_Z.syncDevice();
 	_uPit.syncDevice();
-
-    //_DeviceInterval_Z.ReallocIf(_HostInterval_Z.GetDimension());
-    //_DeviceInterval_Z.CopyHostToDevice(_HostInterval_Z.pData());
 }
 
 void dataCorrelMS::dealloc()
 {
     for (int t = 0; t < NBEPIIMAGE; ++t)
     {
+        GpGpuDestroyTexObj(_texObjImage[t]);
+        GpGpuDestroyTexObj(_texObjMaskErod[t]);
         _HostImage[t].Dealloc();
         _HostMaskErod[t].Dealloc();
         _dt_MaskErod[t].UnbindDealloc();

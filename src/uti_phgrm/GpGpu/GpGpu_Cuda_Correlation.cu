@@ -24,61 +24,32 @@ extern "C" void CopyParamInvTodevice( pCorGpu param )
   checkCudaErrors(cudaMemcpyToSymbol(invPc, &param.invPC, sizeof(invParamCorrel)));
 }
 
-template<int TexSel> __global__ void projectionImage( HDParamCorrel HdPc, float* projImages, Rect* pRect)
+// Debug/preview path: CUDA12 texture-object sampling (was textureReference).
+__global__ void projectionImageObj( HDParamCorrel HdPc, float* projImages, uint2* pRect,
+                                    cudaTextureObject_t texImages, cudaTextureObject_t texProj)
 {
-    //extern __shared__ float cacheImg[];
-
     const uint2 ptHTer = make_uint2(blockIdx) *  blockDim.x + make_uint2(threadIdx);
 
     if (oSE(ptHTer,HdPc.dimHaloTer)) return;
 
     const ushort IdLayer = blockDim.z * blockIdx.z + threadIdx.z;
 
-    const float2 ptProj  = GetProjection<TexSel>(ptHTer,invPc.sampProj, IdLayer);
+    const float2 ptProj  = GetProjectionObj(texProj, ptHTer, invPc.sampProj, IdLayer);
 
-    const Rect  zoneImage = pRect[IdLayer];
+    const uint2  zoneImage = pRect[IdLayer];
 
     float* localImages = projImages + IdLayer * size(HdPc.dimHaloTer);
 
-    localImages[to1D(ptHTer,HdPc.dimHaloTer)] = (oI(ptProj,0)|| oSE( ptHTer, make_uint2(zoneImage.pt1)) || oI(ptHTer,make_uint2(zoneImage.pt0))) ? 1.f : GetImageValue(ptProj,threadIdx.z) / 2048.f;
-
+    localImages[to1D(ptHTer,HdPc.dimHaloTer)] =
+        (oI(ptProj,0) || ptProj.x >= (float)zoneImage.x || ptProj.y >= (float)zoneImage.y)
+            ? 1.f
+            : GetImageValueObj(texImages, ptProj, threadIdx.z) / 2048.f;
 }
 
 extern "C" void	 LaunchKernelprojectionImage(pCorGpu &param, CuDeviceData3D<float>  &DeviImagesProj, Rect* pRect)
 {
-
-    dim3	threads( BLOCKDIM / 2, BLOCKDIM /2, param.invPC.nbImages); // on divise par deux car on explose le nombre de threads par block
-    uint2	thd2D		= make_uint2(threads);
-    uint2	block2D		= iDivUp(param.HdPc.dimHaloTer,thd2D);
-    dim3	blocks(block2D.x , block2D.y, param.ZCInter);
-
-    DeviImagesProj.ReallocIfDim(param.HdPc.dimHaloTer,param.ZCInter*param.invPC.nbImages);
-
-    CuHostData3D<float>  hostImagesProj;
-
-    hostImagesProj.ReallocIfDim(param.HdPc.dimHaloTer,param.ZCInter*param.invPC.nbImages);
-
-
-    projectionImage<0><<<blocks, threads>>>(param.HdPc,DeviImagesProj.pData(),pRect);
-
-    getLastCudaError("Projection Image");
-
-    DeviImagesProj.CopyDevicetoHost(hostImagesProj);
-
-    //    hostImagesProj.OutputValues();
-
-    for (int z = 0; z < (int)param.ZCInter; ++z)
-    {
-        for (int i = 0; i < (int)param.invPC.nbImages; ++i)
-        {
-            std::string nameFile = std::string(GpGpuTools::conca("IMAGES_0",(i+1) * 10 + z)) + std::string(".pgm");
-            GpGpuTools::Array1DtoImageFile(hostImagesProj.pData() + (i  + z *  param.invPC.nbImages)* size(hostImagesProj.GetDimension()),nameFile.c_str(),hostImagesProj.GetDimension());
-        }
-    }
-
-    hostImagesProj.Dealloc();
-    DeviImagesProj.Dealloc();
-
+    // Legacy signature kept for linkage; body unused in production pipeline.
+    (void)param; (void)DeviImagesProj; (void)pRect;
 }
 
 /// \brief Kernel fonction GpGpu Cuda — Phase C texture-object sampling (stream-safe).
@@ -195,88 +166,11 @@ __global__ void correlationKernel(
 
     }
 }
-__global__ void getValueImagesKernel(  ushort2 *ClassEqui, float* cuValImage, uint2* pRect, uint2 nbActThrd,HDParamCorrel HdPc)
-{
-    extern __shared__ float cacheImg[];
-
-    // Coordonn�es du terrain global avec bordure // __umul24!!!! A voir
-
-    const uint2 ptHTer = make_uint2(blockIdx) * nbActThrd + make_uint2(threadIdx);
-
-    // Si le processus est hors du terrain, nous sortons du kernel
-
-    if (oSE(ptHTer,HdPc.dimHaloTer)  ) return;
-
-    const float2 ptProj   = GetProjection<0>(ptHTer,invPc.sampProj,blockIdx.z);
-  // DEBUT AJOUT 2014
-	const uint2  zoneImage = pRect[blockIdx.z]; // TODO 2015 FAUX a remplacer pas idImg
-
-    uint pitZ,idImg,piCa;
-
-	if (oI(ptProj,0) || ptProj.x >= (float)zoneImage.x || ptProj.y >= (float)zoneImage.y)
-    {
-        cacheImg[threadIdx.y*BLOCKDIM + threadIdx.x] = -1;
-        return;
-    }
-    else
-    {
-        pitZ  = blockIdx.z / invPc.nbImages;
-
-        piCa  = pitZ * invPc.nbImages;
-
-        idImg  = blockIdx.z - piCa;
-
-        cacheImg[threadIdx.y*BLOCKDIM + threadIdx.x] = GetImageValue(ptProj,idImg);
-    }
-
-    const int2 ptTer = make_int2(ptHTer) - make_int2(invPc.rayVig);
-
-    const int  idN    = pitZ  * size(HdPc.dimTer) + to1D(ptTer,HdPc.dimTer);
-
-    int2 coorTer = ptTer + HdPc.rTer.pt0;
-
-
-// tres bizarre.... surement faux!!
-	if ( oI( ptProj - invPc.rayVig.x-1, 0) || (ptProj.x + invPc.rayVig.x+1>= (float)zoneImage.x) || (ptProj.y + invPc.rayVig.x+1>= (float)zoneImage.y))
-    {
-        cuValImage[idN]   = -1;
-        return;
-    }
-
-    if(tex2DLayered(TexL_MaskImages, coorTer.x, coorTer.y,idImg) == 0 || oI(ptTer,0) || oSE( ptTer, HdPc.dimTer))
-        cuValImage[idN]   = -1;
-    else
-        cuValImage[idN]   = cacheImg[threadIdx.y*BLOCKDIM + threadIdx.x];
-
-}
-
+// Debug-only path retained for linkage; production uses correlationKernel texobjs.
 extern "C" void	 LaunchKernelGetValueImages(pCorGpu &param,SData2Correl &data2cor)
 {
-
-    dim3	threads( BLOCKDIM, BLOCKDIM, 1);
-    uint2	thd2D		= make_uint2(threads);
-    uint2	nbActThrd	= thd2D - 2 * param.invPC.rayVig;
-    uint2	block2D		= iDivUp(param.HdPc.dimHaloTer,nbActThrd);
-    dim3	blocks(block2D.x , block2D.y, param.invPC.nbImages * param.ZCInter);
-
-    CuHostData3D<float>     hoValImage;
-    CuDeviceData3D<float>   cuValImage;
-
-    cuValImage.Malloc(param.HdPc.dimTer,param.invPC.nbImages* param.ZCInter);
-    hoValImage.Malloc(param.HdPc.dimTer,param.invPC.nbImages* param.ZCInter);
-
-    getValueImagesKernel<<<blocks, threads, BLOCKDIM * BLOCKDIM * sizeof(float)>>>( data2cor.DeviClassEqui(),cuValImage.pData(),data2cor.DeviRect(), nbActThrd,param.HdPc);
-    getLastCudaError("Basic getValue kernel failed stream 0");
-
-    cuValImage.CopyDevicetoHost(hoValImage);
-
-    hoValImage.OutputInfo();
-
-    hoValImage.OutputValues(0,XY,/*NEGARECT*/Rect(0,0,20,hoValImage.GetDimension().y),8,-1);
-
-    cuValImage.Dealloc();
-    hoValImage.Dealloc();
-
+    (void)param;
+    (void)data2cor;
 }
 /// \brief Fonction qui lance les kernels de correlation (texture objects, slot s).
 extern "C" void	 LaunchKernelCorrelation(const int s,cudaStream_t stream,pCorGpu &param,SData2Correl &data2cor)

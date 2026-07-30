@@ -9,7 +9,7 @@ Does **not** depend on `maps` or `maps-next` repos. Consumers (including maps-ne
 |--------|-------------|
 | `micmac-gpgpu-sm86-<gitsha>.tar.gz` | Per-SM package (`bin/mm3d` + MicMac XML) |
 | `micmac-gpgpu-sm80-…`, `sm89-…` | Same for other SMs (CI matrix) |
-| optional fat | `CUDA_ARCHS="80 86 89"` → one binary with all gencodes |
+| optional fat | `CUDA_ARCHS="80 86 89 120"` → one binary with all gencodes |
 | `*.manifest.json` | sha256, git SHA, arch list, install hint |
 | GHCR | `ghcr.io/<owner>/micmac-gpgpu-sm86:<sha>` (and sm80/sm89) |
 
@@ -17,7 +17,7 @@ Does **not** depend on `maps` or `maps-next` repos. Consumers (including maps-ne
 
 See [GPU_SM_MAP.md](./GPU_SM_MAP.md).
 
-CI default (**CUDA 11.8** — required by MicMac legacy texture API):
+CI default (**CUDA 12.8** — texture-object path (CUDA 12 capable)):
 
 | Package | SMs | Use for |
 |---------|-----|---------|
@@ -28,7 +28,7 @@ CI default (**CUDA 11.8** — required by MicMac legacy texture API):
 
 **Always publishes** (on push): Actions artifacts + Release **`cuda-latest`** + GHCR per-SM and `micmac-gpgpu-fat`.
 
-**RTX 5090 / sm_120:** not yet — CUDA 12 removes `textureReference`; needs a code port (see GPU_SM_MAP.md).
+**RTX 5090 / sm_120:** included in default matrix/fat (CUDA 12.8 + texture objects).
 
 **2× cards:** `CUDA_VISIBLE_DEVICES`, not fat.
 
@@ -46,7 +46,7 @@ Triggers:
 
 ## Local / pod build (same script CI uses)
 
-Inside a CUDA **devel** environment (e.g. `nvidia/cuda:11.8.0-devel-ubuntu22.04` or the aerial RunPod image):
+Inside a CUDA **devel** environment (e.g. `nvidia/cuda:12.8.0-devel-ubuntu22.04` or the aerial RunPod image):
 
 ```bash
 # deps: cmake ninja g++ git python3 rsync libtiff-dev …
