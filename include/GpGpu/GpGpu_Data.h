@@ -1281,7 +1281,13 @@ public:
     /// \brief Initialise les valeurs de l image avec un tableau de valeur du Host
     /// \param data : Donnees cible a copier
     bool	copyHostToDevice(T* data){
-        return DecoratorImage<cudaContext>::ErrorOutput(cudaMemcpyToArray(DecoratorImage<cudaContext>::pData(), 0, 0, data, sizeof(T)*size(GetDimension()), cudaMemcpyHostToDevice),__FUNCTION__);
+        // CUDA 12: cudaMemcpyToArray deprecated — use 2D variant.
+        const size_t w = DecoratorImage<cudaContext>::GetDimension().x;
+        const size_t h = DecoratorImage<cudaContext>::GetDimension().y;
+        const size_t spitch = w * sizeof(T);
+        return DecoratorImage<cudaContext>::ErrorOutput(
+            cudaMemcpy2DToArray(DecoratorImage<cudaContext>::pData(), 0, 0, data, spitch, spitch, h, cudaMemcpyHostToDevice),
+            __FUNCTION__);
     }
 
 	///

@@ -9,6 +9,9 @@
 
 #define INTERPOLA LINEARINTER
 
+// Device samplers — host g++ must not parse tex2DLayered (nvcc-only).
+#if defined(__CUDACC__)
+
 /// Sample images via texture object (multi-stream safe).
 inline __device__ float GetImageValueObj(cudaTextureObject_t texImg, float2 ptProj, uint mZ)
 {
@@ -28,5 +31,7 @@ inline __device__ float2 GetProjectionObj(cudaTextureObject_t texProj, uint2 ptT
     return tex2DLayeredPtObj<float2>(texProj, ptTer, (short)sampProj, (short)BZ);
 #endif
 }
+
+#endif /* __CUDACC__ */
 
 #endif /*CUDAREFTEXTURE*/
