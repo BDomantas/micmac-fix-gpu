@@ -150,6 +150,8 @@ public:
 
 	/// Realloc + memset a single stream slot (avoid touching other in-flight slots).
 	void    ReallocDeviceDataSlot(uint s, pCorGpu &param);
+    /// PR-B: stream-ordered clear (cost + NIOk) — no default-stream hot path.
+    void DeviceMemsetAsync(pCorGpu &param, uint s, cudaStream_t stream);
 
 	/// Phase C: create cuda texture objects for images/masks/projections (stream-safe).
 	void    EnsureTextureObjects(uint s = 0);
@@ -289,8 +291,6 @@ private:
     bool                        _texObjReady;
 
     void DeviceMemset(pCorGpu &param, uint s = 0);
-    /// PR-B: stream-ordered clear (cost + NIOk) — no default-stream hot path.
-    void DeviceMemsetAsync(pCorGpu &param, uint s, cudaStream_t stream);
 
     static cudaTextureObject_t CreateLayeredTexObj(cudaArray * arr, bool linearFilter);
     static cudaTextureObject_t Create2DTexObj(cudaArray * arr, bool linearFilter);
