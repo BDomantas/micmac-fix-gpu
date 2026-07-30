@@ -1,0 +1,23 @@
+# Thin runtime image that *contains* a prebuilt install tree (not a full rebuild).
+# Build context: directory that already has bin/mm3d (e.g. unpacked CI package).
+#
+# Example:
+#   tar -xzf micmac-gpgpu-sm86-ABC.tar.gz
+#   docker build -f ci/Dockerfile.release-sm86 -t ghcr.io/bdomantas/micmac-gpgpu-sm86:ABC micmac-gpgpu-sm86-ABC
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
+      libtiff5 libpng16-16 libjpeg-turbo8 zlib1g libexpat1 ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install tree is the build context root
+COPY . /opt/micmac-gpgpu-sm86/
+ENV PATH="/opt/micmac-gpgpu-sm86/bin:${PATH}"
+ENV MICMAC_DIR=/opt/micmac-gpgpu-sm86
+
+# CUDA runtime is provided by the host (RunPod) or a CUDA base when extended.
+# This image is intentionally thin so GPU worker images can COPY --from= it.
+
+ENTRYPOINT ["mm3d"]
+CMD ["-help"]
