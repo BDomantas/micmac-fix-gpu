@@ -289,13 +289,14 @@ inline bool WouldHit(const std::string & image, int dezoom, const ClipRect & req
     return p != nullptr;
 }
 
-/// PDV-local reuse: same dezoom and previous clip covers new clip.
+/// PDV-local reuse: same dezoom and **exact** clip match.
+/// Cover-only reuse is unsafe with cLoadedImage (offsets bound to alloc clip).
 inline bool LocalReuseOk(int prevDezoom, const ClipRect & prevClip,
                          int reqDezoom, const ClipRect & reqClip)
 {
     if (prevDezoom != reqDezoom)
         return false;
-    return prevClip.covers(reqClip);
+    return prevClip.exact(reqClip);
 }
 
 inline void ClearEtape()
