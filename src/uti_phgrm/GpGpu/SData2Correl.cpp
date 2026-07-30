@@ -298,7 +298,7 @@ void SData2Correl::ReallocDeviceDataSlot(uint s, pCorGpu &param)
     if (s >= (uint)NSTREAM)
         s = 0;
     ReallocDeviceData((int)s, param);
-    DeviceMemset(param, s);
+    // PR-B: do not default-stream Memset here — BasicCorrelation clears on the work stream.
 }
 
 void    SData2Correl::DeviceMemset(pCorGpu &param, uint s)
@@ -309,6 +309,20 @@ void    SData2Correl::DeviceMemset(pCorGpu &param, uint s)
     _d_volumeCost[s].Memset(param.invPC.IntDefault);
 
     _d_volumeNIOk[s].Memset(0);
+	#ifdef NVTOOLS
+	GpGpuTools::Nvtx_RangePop();
+	#endif
+}
+
+void SData2Correl::DeviceMemsetAsync(pCorGpu &param, uint s, cudaStream_t stream)
+{
+	#ifdef NVTOOLS
+    GpGpuTools::NvtxR_Push(__FUNCTION__,0xFF1A2BB5);
+	#endif
+    if (s >= (uint)NSTREAM)
+        s = 0;
+    _d_volumeCost[s].MemsetAsync(param.invPC.IntDefault, stream);
+    _d_volumeNIOk[s].MemsetAsync(0, stream);
 	#ifdef NVTOOLS
 	GpGpuTools::Nvtx_RangePop();
 	#endif

@@ -16,11 +16,15 @@
         #include <chrono>
         #include <thread>
         #include <mutex>
+        #include <condition_variable>
+        #include <cstdlib>
     #endif
 #else
 #include <boost/thread/thread.hpp>
+#include <boost/thread/condition_variable.hpp>
 #include <boost/progress.hpp>
 #include <boost/timer.hpp>
+#include <cstdlib>
 #endif
 
 
@@ -131,11 +135,17 @@ private:
     std::mutex    _mutexCompu;
     std::mutex    _mutexCopy;
 	std::mutex    _mutexPreCompute;
+    std::mutex    _mutexWork;          // PR-D: serialize simpleWork enqueue
+    std::condition_variable _cvCompu;  // PR-E
+    std::condition_variable _cvCopy;   // PR-E
     #endif
 #else
     boost::mutex    _mutexCompu;
     boost::mutex    _mutexCopy;
     boost::mutex    _mutexPreCompute;
+    boost::mutex    _mutexWork;
+    boost::condition_variable _cvCompu;
+    boost::condition_variable _cvCopy;
 #endif
 
     T               _compute;
@@ -153,6 +163,9 @@ private:
 template< class T >
 CSimpleJobCpuGpu<T>::CSimpleJobCpuGpu(bool useMultiThreading):
     _useMultiThreading(useMultiThreading),
+    _compute(false),
+    _copy(false),
+    _precompute(false),
     _idBufferHostIn(false),
     #ifndef CPP11_THREAD
     _show_progress(NULL),
@@ -174,13 +187,21 @@ void CSimpleJobCpuGpu<T>::SetCompute(T toBeComputed)
 {
 #ifdef CPP11_THREAD
     #ifdef NOCUDA_X11
-    std::lock_guard<std::mutex> guard(_mutexCompu);
+    {
+        std::lock_guard<std::mutex> guard(_mutexCompu);
+        _compute = toBeComputed;
+    }
+    _cvCompu.notify_all(); // PR-E
+    #else
+    _compute = toBeComputed;
     #endif
 #else
-    boost::lock_guard<boost::mutex> guard(_mutexCompu);
+    {
+        boost::lock_guard<boost::mutex> guard(_mutexCompu);
+        _compute = toBeComputed;
+    }
+    _cvCompu.notify_all();
 #endif
-
-    _compute = toBeComputed;
 }
 
 template< class T >
@@ -201,14 +222,21 @@ void CSimpleJobCpuGpu<T>::SetDataToCopy(T toBeCopy)
 {
 #ifdef CPP11_THREAD
     #ifdef NOCUDA_X11
-    std::lock_guard<std::mutex> guard(_mutexCopy);
+    {
+        std::lock_guard<std::mutex> guard(_mutexCopy);
+        _copy = toBeCopy;
+    }
+    _cvCopy.notify_all(); // PR-E
+    #else
+    _copy = toBeCopy;
     #endif
 #else
-    boost::lock_guard<boost::mutex> guard(_mutexCopy);
+    {
+        boost::lock_guard<boost::mutex> guard(_mutexCopy);
+        _copy = toBeCopy;
+    }
+    _cvCopy.notify_all();
 #endif
-
-    _copy = toBeCopy;
-
 }
 
 template< class T >
@@ -301,7 +329,7 @@ void CSimpleJobCpuGpu<T>::IncProgress(uint inc)
 template< class T >
 void CSimpleJobCpuGpu<T>::simpleCompute()
 {
-    // RUNPOD_GPGPU_DIAG: safer waits + heartbeats (GPU hang diagnosis)
+    // PR-E: primary wait path = condition_variable; optional MICMAC_GPU_POLL_US fallback.
     auto _gpgpu_now = []() -> double {
 #if defined(CPP11_THREAD) && defined(NOCUDA_X11)
         using clock = std::chrono::steady_clock;
@@ -309,6 +337,14 @@ void CSimpleJobCpuGpu<T>::simpleCompute()
 #else
         return 0.0;
 #endif
+    };
+    auto _poll_us = []() -> int {
+        // 0 (default) => CV wait; >0 => debug poll period in microseconds
+        const char * e = std::getenv("MICMAC_GPU_POLL_US");
+        if (!e || !e[0])
+            return 0;
+        int v = std::atoi(e);
+        return v > 0 ? v : 0;
     };
     auto _gpgpu_sleep_us = [](int us) {
 #ifdef CPP11_THREAD
@@ -324,19 +360,33 @@ void CSimpleJobCpuGpu<T>::simpleCompute()
     double t0 = _gpgpu_now();
     double t_last = t0;
     unsigned long wait_iters = 0;
+    const int pollUs = _poll_us();
     while(!GetCompute())
     {
         wait_iters++;
-        _gpgpu_sleep_us(200);
+        if (pollUs > 0)
+        {
+            _gpgpu_sleep_us(pollUs);
+        }
+        else
+        {
+#if defined(CPP11_THREAD) && defined(NOCUDA_X11)
+            std::unique_lock<std::mutex> lk(_mutexCompu);
+            _cvCompu.wait_for(lk, std::chrono::milliseconds(50), [this]{ return (bool)_compute; });
+#else
+            boost::unique_lock<boost::mutex> lk(_mutexCompu);
+            _cvCompu.timed_wait(lk, boost::posix_time::milliseconds(50));
+#endif
+        }
         double t = _gpgpu_now();
-        // Heartbeats only in FULL; long-stall WARNING at MIN (or FULL).
         if (GpgpuDiagFull() && (t - t_last >= 2.0))
         {
             GPGPU_DIAG_FULL(
                 "[GPGPU][RUNPOD_GPGPU_DIAG] simpleCompute WAIT_COMPUTE pid=%d elapsed=%.1fs iters=%lu "
-                "compute=%d copy=%d pre=%d idBuf=%d\n",
+                "compute=%d copy=%d pre=%d idBuf=%d poll_us=%d\n",
                 (int)getpid(), t - t0, wait_iters,
-                (int)GetCompute(), (int)GetDataToCopy(), (int)GetPreComp(), (int)GetIdBuf());
+                (int)GetCompute(), (int)GetDataToCopy(), (int)GetPreComp(), (int)GetIdBuf(),
+                pollUs);
             t_last = t;
         }
         if (t - t0 > 600.0 && wait_iters % 5000 == 0)
@@ -351,7 +401,15 @@ void CSimpleJobCpuGpu<T>::simpleCompute()
     GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] simpleCompute WORK_BEGIN pid=%d wait_compute=%.2fs\n",
             (int)getpid(), _gpgpu_now() - t0);
     double t_work0 = _gpgpu_now();
-    simpleWork();
+    // PR-D: serialize enqueue so dual workers do not race GetIdBuf; GPU work can still overlap via streams.
+    {
+#if defined(CPP11_THREAD) && defined(NOCUDA_X11)
+        std::lock_guard<std::mutex> workGuard(_mutexWork);
+#else
+        boost::lock_guard<boost::mutex> workGuard(_mutexWork);
+#endif
+        simpleWork();
+    }
     GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] simpleCompute WORK_END pid=%d work=%.2fs\n",
             (int)getpid(), _gpgpu_now() - t_work0);
 
@@ -360,9 +418,21 @@ void CSimpleJobCpuGpu<T>::simpleCompute()
     wait_iters = 0;
     while(GetDataToCopy())
     {
-        // was busy-spin with sleep commented out — host may never clear flag
         wait_iters++;
-        _gpgpu_sleep_us(200);
+        if (pollUs > 0)
+        {
+            _gpgpu_sleep_us(pollUs);
+        }
+        else
+        {
+#if defined(CPP11_THREAD) && defined(NOCUDA_X11)
+            std::unique_lock<std::mutex> lk(_mutexCopy);
+            _cvCopy.wait_for(lk, std::chrono::milliseconds(50), [this]{ return !_copy; });
+#else
+            boost::unique_lock<boost::mutex> lk(_mutexCopy);
+            _cvCopy.timed_wait(lk, boost::posix_time::milliseconds(50));
+#endif
+        }
         double t = _gpgpu_now();
         if (GpgpuDiagFull() && (t - t_last >= 2.0))
         {

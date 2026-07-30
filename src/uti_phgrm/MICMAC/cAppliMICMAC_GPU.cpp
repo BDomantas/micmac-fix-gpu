@@ -1967,6 +1967,11 @@ void cAppliMICMAC::DoGPU_Correl
 
 #endif
 
+#if CUDA_ENABLED
+#include "GpGpu/GpGpu_Budget.h"
+#include "GpGpu/GpGpu_SlotMap.h"
+#endif
+
     void cAppliMICMAC::DoGPU_Correl_Basik
         (
         const Box2di & aBox
@@ -2006,7 +2011,12 @@ unsigned long _gpgpu_idle = 0;
                 // Tabulation des projections si la demande est faite
 
                 //if ( IMmGg.GetPreComp() && anZProjection <= anZComputed + (int)interZ && anZProjection < mZMaxGlob)
-                if( aKPreCellZ <= aKCellZ + 1 && aKPreCellZ < nbCellZ &&  IMmGg.GetPreComp() )
+                // PR-D: prep ahead depth = min(active_slots, SIZERING) so dual Z can be enqueued.
+                {
+                const int prepDepth = gpgpu_slot::PrepAheadDepth(gpgpu_budget::GetActiveSlotsRuntime(), SIZERING);
+                // Outstanding preps limited to prepDepth (≤ SIZERING); dual slots use both ring ids.
+                if( aKPreCellZ < aKCellZ + prepDepth
+                    && aKPreCellZ < nbCellZ &&  IMmGg.GetPreComp() )
                 {
 
                     cellules Mask = IMmGg.MaskVolumeBlock()[aKPreCellZ];
@@ -2020,7 +2030,8 @@ unsigned long _gpgpu_idle = 0;
 
                     //IMmGg.signalComputeCorrel(Mask.Dz);
                     IMmGg.SetPreComp(false);
-                    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] Correl PREP cellPre=%d/%d Zproj=%d\n", aKPreCellZ, nbCellZ, anZProjection);
+                    GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] Correl PREP cellPre=%d/%d Zproj=%d depth=%d\n",
+                            aKPreCellZ, nbCellZ, anZProjection, prepDepth);
                     IMmGg.simpleJob();
                     _did = true;                    
 
@@ -2028,15 +2039,19 @@ unsigned long _gpgpu_idle = 0;
                     aKPreCellZ++;
                     idPreBuf = !idPreBuf;
                 }
+                }
                 // Affectation des couts si des nouveaux ont ete calcule!
 
                 if (IMmGg.GetDataToCopy())
                 {
-                    uint ZtoCopy = IMmGg.Param(!IMmGg.GetIdBuf()).ZCInter;
+                    ushort idCopy = (ushort)(!IMmGg.GetIdBuf());
+                    uint ZtoCopy = IMmGg.Param(idCopy).ZCInter;
                     GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] Correl COPY cell=%d/%d ZtoCopy=%u Zcomp=%d\n",
                             aKCellZ, nbCellZ, ZtoCopy, anZComputed);
                     fflush(stderr);
-                    setVolumeCost(anZComputed,anZComputed + ZtoCopy,!IMmGg.GetIdBuf());
+                    // PR-C: host consumes only after per-slot D2H event completes.
+                    IMmGg.WaitCorrelDone(idCopy);
+                    setVolumeCost(anZComputed,anZComputed + ZtoCopy,idCopy);
                     IMmGg.SetDataToCopy(false);
                     anZComputed += ZtoCopy;
                     aKCellZ++;
@@ -2045,8 +2060,13 @@ unsigned long _gpgpu_idle = 0;
                 if (!_did)
                 {
                     _gpgpu_idle++;
+                    // PR-E: host idle wait — short sleep only as fallback; primary wake is flag/CV from worker.
 #if (!ELISE_windows)
-                    { struct timespec _ts; _ts.tv_sec=0; _ts.tv_nsec=2000000L; nanosleep(&_ts, 0); }
+                    {
+                        // Prefer env poll; default 200µs is no longer primary path on worker.
+                        // Host uses 200µs CV-friendly pause (not 2ms busy sleep).
+                        struct timespec _ts; _ts.tv_sec=0; _ts.tv_nsec=200000L; nanosleep(&_ts, 0);
+                    }
 #endif
                     if ((_gpgpu_idle % 1000) == 0)
                     {

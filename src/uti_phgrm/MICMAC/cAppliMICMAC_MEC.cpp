@@ -43,6 +43,7 @@ Header-MicMac-eLiSe-25/06/2007*/
 #if CUDA_ENABLED
 #include "GpGpu/GpGpu_AutoNbProc.h"
 #include "GpGpu/GpGpu_Pipeline.h"
+#include "GpGpu/GpGpu_ImageLru.h"
 #include "GpGpu/GpGpu_Budget.h"
 #endif
 #include "../src/uti_phgrm/MICMAC/MICMAC.h"
@@ -398,7 +399,16 @@ void cAppliMICMAC::DoOneEtapeMEC(cEtapeMecComp & anEtape)
     }
 
 
-     mNbPtsWFixe = (1+2*mPtSzWFixe.x*mCurSurEchWCor)*(1+2*mPtSzWFixe.y*mCurSurEchWCor);
+     #if CUDA_ENABLED
+     // Phase H: etape-scoped image window LRU (invalidate on DeZoom/etape change)
+     if (gpgpu_img_lru::Enabled())
+     {
+         gpgpu_img_lru::ClearEtape();
+         GPGPU_DIAG_MIN("[GPGPU][IMG_LRU] clear_etape Num=%d DeZoomIm=%d\n",
+             anEtape.Num(), anEtape.DeZoomIm());
+     }
+#endif
+mNbPtsWFixe = (1+2*mPtSzWFixe.x*mCurSurEchWCor)*(1+2*mPtSzWFixe.y*mCurSurEchWCor);
      int aDZIm = anEtape.DeZoomIm();
      
      mVecPtsW = std::vector<Pt2dr>(mNbPtsWFixe,Pt2dr(0,0));
@@ -988,6 +998,11 @@ void cAppliMICMAC::DoOneBloc
 	   
       mCout << "      " << mNbImChCalc << " Images Loaded\n";
    }
+
+#if CUDA_ENABLED
+   if (gpgpu_img_lru::Enabled())
+       gpgpu_img_lru::LogIfEnabled();
+#endif
 
    // Initialisation de mTabV1 et aVPtInEc
    //  mTabV1 : zone memoire pour stocker les valeurs de Im1 (acceleration "speciale")

@@ -38,6 +38,11 @@ English :
 Header-MicMac-eLiSe-25/06/2007*/
 #include "StdAfx.h"
 #include "../src/uti_phgrm/MICMAC/MICMAC.h"
+#if CUDA_ENABLED
+#include "GpGpu/GpGpu_ImageLru.h"
+#include "GpGpu/GpGpu_Diag.h"
+#endif
+
 
 static Pt2di aSzTileMasq(1000000,1000000);
 
@@ -141,6 +146,9 @@ cPriseDeVue::cPriseDeVue
    mGeomTerAssoc    (0),
    mSzIm            (-1,-1),
    mLoadIm          (0),
+   mLruClipValid    (false),
+   mLruDezoom       (-1),
+   mLruX0(0), mLruY0(0), mLruX1(0), mLruY1(0),
    mNameClassEquiv  (mAppli.NameClassEquiv(mName)),
    mNumEquiv        (-1),
    mNuagePredict    (0)
@@ -293,8 +301,6 @@ bool cPriseDeVue::LoadImageMM
           bool  IsFirstLoaded
      )
 {
-    delete mLoadIm;
-    mLoadIm = 0;
     mCurEtape = mAppli.CurEtape ();
 
     bool WithRab = (mAppli.PtrVI() == 0);
@@ -326,6 +332,35 @@ bool cPriseDeVue::LoadImageMM
     // getchar();
 
    int aDZ = mCurEtape->DeZoomIm();
+   Pt2di aP0 = mGeom->BoxClip()._p0;
+   Pt2di aP1 = mGeom->BoxClip()._p1;
+
+#if CUDA_ENABLED
+   // Phase H: reuse prior pyramid window when env on and prior clip covers this request.
+   if (gpgpu_img_lru::Enabled() && mLoadIm != 0 && mLruClipValid)
+   {
+       gpgpu_img_lru::ClipRect prev{mLruX0, mLruY0, mLruX1, mLruY1};
+       gpgpu_img_lru::ClipRect req{aP0.x, aP0.y, aP1.x, aP1.y};
+       if (gpgpu_img_lru::LocalReuseOk(mLruDezoom, prev, aDZ, req))
+       {
+           // Hit: keep mLoadIm, skip disk pyramid decode.
+           gpgpu_img_lru::RecordLoad(mName, aDZ, prev,
+               (size_t)std::max<long long>(1, prev.area()));
+           if (GpgpuDiagMin())
+           {
+               std::fprintf(stderr,
+                   "[GPGPU][IMG_LRU] HIT image=%s dezoom=%d clip=[%d,%d]-[%d,%d]\n",
+                   mName.c_str(), aDZ, req.x0, req.y0, req.x1, req.y1);
+               std::fflush(stderr);
+           }
+           return true;
+       }
+   }
+#endif
+
+    delete mLoadIm;
+    mLoadIm = 0;
+
    mLoadIm = cLoadedImage::Alloc
              ( 
                  mAppli,
@@ -338,6 +373,26 @@ bool cPriseDeVue::LoadImageMM
                  FileImMasqOfResol(aDZ).in_bool_proj(),
 		 IsFirstLoaded
              );
+#if CUDA_ENABLED
+   // Miss path: record window for later cover hits.
+   mLruClipValid = true;
+   mLruDezoom = aDZ;
+   mLruX0 = aP0.x; mLruY0 = aP0.y; mLruX1 = aP1.x; mLruY1 = aP1.y;
+   if (gpgpu_img_lru::Enabled())
+   {
+       gpgpu_img_lru::ClipRect clip{mLruX0, mLruY0, mLruX1, mLruY1};
+       gpgpu_img_lru::RecordLoad(mName, aDZ, clip,
+           (size_t)std::max<long long>(1, clip.area()));
+       if (GpgpuDiagMin())
+       {
+           std::fprintf(stderr,
+               "[GPGPU][IMG_LRU] MISS image=%s dezoom=%d clip=[%d,%d]-[%d,%d]\n",
+               mName.c_str(), aDZ, mLruX0, mLruY0, mLruX1, mLruY1);
+           std::fflush(stderr);
+       }
+   }
+#endif
+
 
    delete mNuagePredict;
    mNuagePredict = 0;

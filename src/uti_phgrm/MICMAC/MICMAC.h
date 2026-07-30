@@ -742,6 +742,11 @@ class cPriseDeVue
             cGeomImage *				mGeomTerAssoc;  // Geometrie terrain associee
             mutable Pt2di				mSzIm; // Taille pleine resol
             cLoadedImage *				mLoadIm;
+
+            // Phase H: PDV-local last loaded pyramid window (host LRU assist)
+            bool                        mLruClipValid;
+            int                         mLruDezoom;
+            int                         mLruX0, mLruY0, mLruX1, mLruY1;
             const cEtapeMecComp*		mCurEtape;
             bool						mIsMaitre;
 			std::vector<cModGeomComp *> mVModif;

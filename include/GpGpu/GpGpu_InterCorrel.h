@@ -122,6 +122,13 @@ public:
   ///
   std::vector<cellules> &MaskVolumeBlock();
 
+  /// PR-C/D: wait until D2H for host buffer id is complete (per-slot CUDA event).
+  void            WaitCorrelDone(ushort idBuf);
+
+  /// PR-D: map host ring id → device slot (active_slots aware).
+  int             MapSlotForIdBuf(ushort idBuf) const;
+
+
   ///
   /// \brief NoMasked
   /// Param�tre qui indique si les cellules doivent etre calculer
@@ -138,6 +145,9 @@ private:
   void              simpleWork();
 
   cudaStream_t      _stream[NSTREAM];
+  /// PR-C: per-slot completion events (recorded after D2H).
+  cudaEvent_t       _doneEvent[NSTREAM];
+  bool              _eventRecorded[NSTREAM];
 
   pCorGpu           _param[2];
 

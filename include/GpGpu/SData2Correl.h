@@ -289,6 +289,8 @@ private:
     bool                        _texObjReady;
 
     void DeviceMemset(pCorGpu &param, uint s = 0);
+    /// PR-B: stream-ordered clear (cost + NIOk) — no default-stream hot path.
+    void DeviceMemsetAsync(pCorGpu &param, uint s, cudaStream_t stream);
 
     static cudaTextureObject_t CreateLayeredTexObj(cudaArray * arr, bool linearFilter);
     static cudaTextureObject_t Create2DTexObj(cudaArray * arr, bool linearFilter);
