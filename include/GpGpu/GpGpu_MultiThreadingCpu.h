@@ -347,12 +347,12 @@ void CSimpleJobCpuGpu<T>::simpleCompute()
         return v > 0 ? v : 0;
     };
     auto _gpgpu_sleep_us = [](int us) {
-#ifdef CPP11_THREAD
-    #ifdef NOCUDA_X11
+#if defined(CPP11_THREAD) && defined(NOCUDA_X11)
         std::this_thread::sleep_for(std::chrono::microseconds(us));
-    #endif
-#else
+#elif !defined(CPP11_THREAD)
         boost::this_thread::sleep(boost::posix_time::microsec(us));
+#else
+        (void)us; // nvcc host path without threads — no-op
 #endif
     };
     GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] simpleCompute ENTER pid=%d\n", (int)getpid());
@@ -373,9 +373,12 @@ void CSimpleJobCpuGpu<T>::simpleCompute()
 #if defined(CPP11_THREAD) && defined(NOCUDA_X11)
             std::unique_lock<std::mutex> lk(_mutexCompu);
             _cvCompu.wait_for(lk, std::chrono::milliseconds(50), [this]{ return (bool)_compute; });
-#else
+#elif !defined(CPP11_THREAD)
             boost::unique_lock<boost::mutex> lk(_mutexCompu);
             _cvCompu.timed_wait(lk, boost::posix_time::milliseconds(50));
+#else
+            // CPP11 without NOCUDA_X11 (e.g. nvcc parse): short sleep poll
+            _gpgpu_sleep_us(200);
 #endif
         }
         double t = _gpgpu_now();
@@ -405,10 +408,13 @@ void CSimpleJobCpuGpu<T>::simpleCompute()
     {
 #if defined(CPP11_THREAD) && defined(NOCUDA_X11)
         std::lock_guard<std::mutex> workGuard(_mutexWork);
-#else
-        boost::lock_guard<boost::mutex> workGuard(_mutexWork);
-#endif
         simpleWork();
+#elif !defined(CPP11_THREAD)
+        boost::lock_guard<boost::mutex> workGuard(_mutexWork);
+        simpleWork();
+#else
+        simpleWork();
+#endif
     }
     GPGPU_DIAG_FULL("[GPGPU][RUNPOD_GPGPU_DIAG] simpleCompute WORK_END pid=%d work=%.2fs\n",
             (int)getpid(), _gpgpu_now() - t_work0);
@@ -428,9 +434,11 @@ void CSimpleJobCpuGpu<T>::simpleCompute()
 #if defined(CPP11_THREAD) && defined(NOCUDA_X11)
             std::unique_lock<std::mutex> lk(_mutexCopy);
             _cvCopy.wait_for(lk, std::chrono::milliseconds(50), [this]{ return !_copy; });
-#else
+#elif !defined(CPP11_THREAD)
             boost::unique_lock<boost::mutex> lk(_mutexCopy);
             _cvCopy.timed_wait(lk, boost::posix_time::milliseconds(50));
+#else
+            _gpgpu_sleep_us(200);
 #endif
         }
         double t = _gpgpu_now();
