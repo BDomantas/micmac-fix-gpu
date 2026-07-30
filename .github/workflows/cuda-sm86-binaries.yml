@@ -224,14 +224,10 @@ jobs:
             | sm_80 | A100 |
             | sm_86 | A4500 / Ampere pro |
             | sm_89 | L40S, RTX 5000 Ada, RTX 5880 Ada, RTX PRO 5000 Ada |
-| sm_120 | RTX 5090 / Blackwell |
+            | sm_120 | RTX 5090 / Blackwell |
 
             ### Fat
             One binary with **sm_80 + sm_86 + sm_89 + sm_120** (CUDA 12.8, texture objects).
-
-            | SM | GPUs |
-            |----|------|
-            | sm_120 | RTX 5090 / Blackwell |
 
             Multi-GPU (2× cards): one process per GPU (`CUDA_VISIBLE_DEVICES`).
           files: artifacts/**
