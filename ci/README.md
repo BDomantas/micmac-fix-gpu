@@ -7,11 +7,21 @@ Does **not** depend on `maps` or `maps-next` repos. Consumers (including maps-ne
 
 | Output | Description |
 |--------|-------------|
-| `micmac-gpgpu-sm86-<gitsha>.tar.gz` | Install tree with `bin/mm3d` + MicMac XML |
-| `*.manifest.json` | sha256, git SHA, arch, install hint |
-| GHCR image (optional) | `ghcr.io/<owner>/micmac-gpgpu-sm86:<sha>` thin Ubuntu + binary |
+| `micmac-gpgpu-sm86-<gitsha>.tar.gz` | Per-SM package (`bin/mm3d` + MicMac XML) |
+| `micmac-gpgpu-sm80-…`, `sm89-…` | Same for other SMs (CI matrix) |
+| optional fat | `CUDA_ARCHS="80 86 89"` → one binary with all gencodes |
+| `*.manifest.json` | sha256, git SHA, arch list, install hint |
+| GHCR | `ghcr.io/<owner>/micmac-gpgpu-sm86:<sha>` (and sm80/sm89) |
 
-**CUDA arch default: sm_86** (Ampere A4500 / similar). Override with `CUDA_ARCH=89` for Ada.
+### Architectures (easy)
+
+| Env | Meaning |
+|-----|---------|
+| `CUDA_ARCH=86` | Primary SM for cmake (default **86**) |
+| `CUDA_ARCHS=86` | Single-SM binary (default = `CUDA_ARCH`) |
+| `CUDA_ARCHS="80 86 89"` | **Fat** binary (one mm3d, multiple `--generate-code`) |
+
+CI matrix (default) builds **separate jobs** for `80`, `86`, `89` so you can pull exactly `sm_86` for A4500 without downloading Ada/Turing flavors.
 
 Build is **compile-only** on GitHub Actions (no GPU on the runner). Runtime still needs a host with NVIDIA driver + matching CUDA userland.
 

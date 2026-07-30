@@ -1,20 +1,22 @@
 #!/usr/bin/env bash
-# Standalone CUDA sm_86 MicMac (mm3d) build for CI / offline packaging.
+# Standalone CUDA MicMac (mm3d) build for CI / offline packaging.
 #
 # Produces:
-#   dist/micmac-gpgpu-sm86-<gitsha>.tar.gz
-#   dist/micmac-gpgpu-sm86-<gitsha>.manifest.json
+#   dist/micmac-gpgpu-sm<ARCHS>-<gitsha>.tar.gz
+#   dist/micmac-gpgpu-sm<ARCHS>-<gitsha>.manifest.json
 #
 # Env:
-#   CUDA_ARCH=86|89|80     (default 86 — A4500 / Ampere)
+#   CUDA_ARCH=86           primary arch for cmake MICMAC_CUDA_ARCH (default 86)
+#   CUDA_ARCHS=86          comma/space list of SMs to embed, e.g. "80,86,89"
+#                          default = CUDA_ARCH only. Fat binary = one mm3d, many SMs.
 #   JOBS=N                 (default nproc)
-#   BUILD_DIR=...          (default $ROOT/build-ci-sm86)
-#   PREFIX=...             (default $ROOT/install-ci-sm86)
+#   BUILD_DIR=...          (default $ROOT/build-ci-sm${CUDA_ARCH})
+#   PREFIX=...             (default $ROOT/install-ci-sm${CUDA_ARCH})
 #   DIST_DIR=...           (default $ROOT/dist)
 #   CUDA_HOME=...          (default /usr/local/cuda)
 #   CUDA_SAMPLE_DIR=...    (auto-setup via ci/setup_cuda_samples.sh)
 #   SKIP_SAMPLES=1         if CUDA_SAMPLE_DIR already set
-#   APPLY_OVERRIDES=1      default 1 — apply sm86 cmake patches
+#   APPLY_OVERRIDES=1      default 1 — apply modern-arch cmake patches
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -22,16 +24,38 @@ cd "$ROOT"
 
 export DEBIAN_FRONTEND="${DEBIAN_FRONTEND:-noninteractive}"
 CUDA_ARCH="${CUDA_ARCH:-86}"
+# Optional multi-SM fat binary: CUDA_ARCHS="80,86,89"
+CUDA_ARCHS="${CUDA_ARCHS:-$CUDA_ARCH}"
+# Normalize separators → spaces
+CUDA_ARCHS_NORM="$(echo "$CUDA_ARCHS" | tr ',;/' ' ' | xargs)"
+# Primary arch = first in list (or CUDA_ARCH)
+PRIMARY_ARCH="$(echo "$CUDA_ARCHS_NORM" | awk '{print $1}')"
+CUDA_ARCH="$PRIMARY_ARCH"
+# Artifact label: sm86  or  sm80_86_89 (fat binary)
+SM_LABEL="sm$(echo "$CUDA_ARCHS_NORM" | tr ' ' '_')"
+
 JOBS="${JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
-BUILD_DIR="${BUILD_DIR:-$ROOT/build-ci-sm86}"
-PREFIX="${PREFIX:-$ROOT/install-ci-sm86}"
+BUILD_DIR="${BUILD_DIR:-$ROOT/build-ci-${SM_LABEL}}"
+PREFIX="${PREFIX:-$ROOT/install-ci-${SM_LABEL}}"
 DIST_DIR="${DIST_DIR:-$ROOT/dist}"
 CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
 APPLY_OVERRIDES="${APPLY_OVERRIDES:-1}"
 
+# Build nvcc multi-gencode flags
+NVCC_GENCODES=""
+for a in $CUDA_ARCHS_NORM; do
+  case "$a" in
+    ''|*[!0-9]*) echo "ERROR: invalid CUDA arch '$a' (digits only, e.g. 86)" >&2; exit 2 ;;
+  esac
+  NVCC_GENCODES+=" --generate-code=arch=compute_${a},code=sm_${a}"
+done
+NVCC_GENCODES="$(echo "$NVCC_GENCODES" | xargs)"
+
 echo "=== micmac-gpgpu CI build $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
 echo "ROOT=$ROOT"
-echo "CUDA_ARCH=$CUDA_ARCH JOBS=$JOBS"
+echo "CUDA_ARCH(primary)=$CUDA_ARCH CUDA_ARCHS='$CUDA_ARCHS_NORM' SM_LABEL=$SM_LABEL"
+echo "NVCC_GENCODES=$NVCC_GENCODES"
+echo "JOBS=$JOBS"
 echo "BUILD_DIR=$BUILD_DIR PREFIX=$PREFIX"
 git rev-parse --short HEAD 2>/dev/null || true
 git rev-parse HEAD 2>/dev/null || true
@@ -93,7 +117,7 @@ cmake -S "$ROOT" -B "$BUILD_DIR" "${CMAKE_GEN[@]}" \
   -DCUDA_CPP11THREAD_NOBOOSTTHREAD=ON \
   -DCUDA_FASTMATH=ON \
   -DMICMAC_CUDA_ARCH="$CUDA_ARCH" \
-  -DCUDA_NVCC_FLAGS="--generate-code=arch=compute_${CUDA_ARCH},code=sm_${CUDA_ARCH}"
+  -DCUDA_NVCC_FLAGS="$NVCC_GENCODES"
 
 grep -q "CUDA_ENABLED:BOOL=ON" "$BUILD_DIR/CMakeCache.txt"
 
@@ -143,8 +167,8 @@ fi
 GIT_SHA="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 GIT_SHORT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 GIT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
-STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-NAME="micmac-gpgpu-sm${CUDA_ARCH}-${GIT_SHORT}"
+STAMP="$(date -u +%Y%m%dT%H:%M:%SZ)"
+NAME="micmac-gpgpu-${SM_LABEL}-${GIT_SHORT}"
 TAR="$DIST_DIR/${NAME}.tar.gz"
 MANIFEST="$DIST_DIR/${NAME}.manifest.json"
 
@@ -176,12 +200,15 @@ import json, os, sys
 from datetime import datetime, timezone
 path = sys.argv[1]
 man = {
-  "kind": "micmac-gpgpu-sm86-artifact",
+  "kind": "micmac-gpgpu-cuda-artifact",
   "generated_at": datetime.now(tz=timezone.utc).isoformat(),
   "git_sha": "$GIT_SHA",
   "git_short": "$GIT_SHORT",
   "git_branch": "$GIT_BRANCH",
-  "cuda_arch": "sm_$CUDA_ARCH",
+  "cuda_arch_primary": "sm_$CUDA_ARCH",
+  "cuda_archs": "$CUDA_ARCHS_NORM".split(),
+  "sm_label": "$SM_LABEL",
+  "nvcc_gencodes": "$NVCC_GENCODES",
   "cuda_toolkit": os.environ.get("CUDA_HOME", "$CUDA_HOME"),
   "artifact": os.path.basename("$TAR"),
   "sha256": "$SHA256",
@@ -195,7 +222,7 @@ man = {
     "HostIdleWaitForProgress",
   ],
   "install_hint": "tar -xzf ARTIFACT && export PATH=\$PWD/$NAME/bin:\$PATH",
-  "consumer_note": "Standalone binary for aerial GPU workers (e.g. maps-next). Does not require recompiling on the pod if glibc/CUDA driver match.",
+  "consumer_note": "Standalone CUDA mm3d. Fat binaries (multiple sm_XX) run on any listed arch; driver must support the GPU.",
 }
 open(path, "w").write(json.dumps(man, indent=2) + "\n")
 print("wrote", path)

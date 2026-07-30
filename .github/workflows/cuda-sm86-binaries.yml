@@ -1,15 +1,10 @@
-# Build CUDA-enabled mm3d (sm_86) and publish pullable artifacts.
-# Standalone: lives entirely in BDomantas/micmac-fix-gpu (not maps-next).
+# Build CUDA-enabled mm3d and publish pullable artifacts.
+# Standalone: BDomantas/micmac-fix-gpu only (not maps-next).
 #
-# Triggers:
-#   - push to gpu-instream / gpu-remaining-features-prbe-h / main
-#   - tags v*
-#   - workflow_dispatch (optional release publish)
+# Produces one artifact per SM (matrix): sm_75 / sm_80 / sm_86 / sm_89
+# Or override via workflow_dispatch inputs.
 #
-# Artifacts:
-#   - GitHub Actions artifact (always)
-#   - GitHub Release assets when tag v* or dispatch input publish_release=true
-#   - Optional GHCR image: ghcr.io/<owner>/micmac-gpgpu-sm86:<sha>
+# Compile-only on GHA (no GPU). Runtime needs NVIDIA driver on target host.
 
 name: CUDA sm86 binaries
 
@@ -25,20 +20,24 @@ on:
   workflow_dispatch:
     inputs:
       publish_release:
-        description: "Also create/update a GitHub Release with the tarball"
+        description: "Also create/update a GitHub Release with the tarballs"
         type: boolean
         default: false
-      cuda_arch:
-        description: "CUDA SM arch (86=A4500 Ampere, 89=Ada)"
+      cuda_archs:
+        description: "Comma-separated SMs to build as separate jobs (e.g. 86 or 80,86,89)"
         type: string
-        default: "86"
+        default: "80,86,89"
+      fat_binary:
+        description: "Also build one fat binary embedding all listed SMs"
+        type: boolean
+        default: false
       push_ghcr:
-        description: "Push thin runtime image to GHCR"
+        description: "Push thin runtime images to GHCR (one per SM)"
         type: boolean
         default: true
 
 concurrency:
-  group: cuda-sm86-${{ github.ref }}
+  group: cuda-sm-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -46,43 +45,56 @@ permissions:
   packages: write
   actions: read
 
-env:
-  CUDA_ARCH_DEFAULT: "86"
-
 jobs:
+  # Expand arch list into a JSON matrix (default 80,86,89).
+  prepare:
+    name: prepare-matrix
+    runs-on: ubuntu-22.04
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+      archs: ${{ steps.set.outputs.archs }}
+    steps:
+      - name: Build matrix JSON
+        id: set
+        shell: bash
+        env:
+          ARCHS_IN: ${{ github.event.inputs.cuda_archs || '80,86,89' }}
+        run: |
+          set -euo pipefail
+          ARCHS=$(echo "$ARCHS_IN" | tr ',;/' ' ' | xargs)
+          export ARCHS
+          echo "Building SMs: $ARCHS"
+          echo "archs=$ARCHS" >> "$GITHUB_OUTPUT"
+          python3 -c 'import json,os; archs=os.environ["ARCHS"].split(); m={"include":[{"arch":a,"sm_label":f"sm{a}"} for a in archs]}; line="matrix="+json.dumps(m,separators=(",",":")); open(os.environ["GITHUB_OUTPUT"],"a").write(line+"\n"); print(line)'
+
   build:
-    name: build-cuda-sm86
+    name: build-${{ matrix.sm_label }}
+    needs: prepare
     runs-on: ubuntu-22.04
     timeout-minutes: 360
-    # CUDA container has no GPU on GHA — that is OK: nvcc compiles sm_86 device
-    # code without a device. Runtime still needs NVIDIA driver on the target host.
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    # CUDA container: compile-only (no GPU on runner).
     container:
       image: nvidia/cuda:11.8.0-devel-ubuntu22.04
-    # Container default shell is often /bin/sh (dash) which rejects `pipefail`.
     defaults:
       run:
         shell: bash
 
     env:
-      CUDA_ARCH: ${{ github.event.inputs.cuda_arch || '86' }}
+      CUDA_ARCH: ${{ matrix.arch }}
+      CUDA_ARCHS: ${{ matrix.arch }}
       CUDA_HOME: /usr/local/cuda
       DEBIAN_FRONTEND: noninteractive
       JOBS: "4"
 
-    outputs:
-      artifact_name: ${{ steps.meta.outputs.artifact_name }}
-      git_short: ${{ steps.meta.outputs.git_short }}
-
     steps:
-      - name: Ensure bash + disk report
-        # nvidia/cuda image is minimal; GHA may invoke steps via sh unless shell:bash
+      - name: Disk report
         run: |
           set -euo pipefail
           command -v bash
           df -h
-          # Inside the job container, host-side free-space tricks rarely apply;
-          # just show free space so OOM-disk failures are diagnosable.
-          df -h "$GITHUB_WORKSPACE" 2>/dev/null || true
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -100,6 +112,7 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           nvcc --version
           cmake --version
+          echo "Building SM=${CUDA_ARCH} (${{ matrix.sm_label }})"
 
       - name: Build + package
         id: build
@@ -110,87 +123,124 @@ jobs:
           ls -lah dist/
           cat dist/*.manifest.json
           TAR=$(ls dist/micmac-gpgpu-sm${CUDA_ARCH}-*.tar.gz | head -1)
+          test -f "$TAR"
           echo "tar=$(basename "$TAR")" >> "$GITHUB_OUTPUT"
-
-      - name: Meta
-        id: meta
-        run: |
-          set -euo pipefail
-          SHORT=$(echo "${{ github.sha }}" | cut -c1-12)
-          echo "git_short=$SHORT" >> "$GITHUB_OUTPUT"
-          echo "artifact_name=micmac-gpgpu-sm${CUDA_ARCH}-${{ github.sha }}" >> "$GITHUB_OUTPUT"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: micmac-gpgpu-sm${{ env.CUDA_ARCH }}-${{ github.sha }}
+          name: micmac-gpgpu-${{ matrix.sm_label }}-${{ github.sha }}
           path: |
             dist/*.tar.gz
             dist/*.manifest.json
           if-no-files-found: error
           retention-days: 30
 
-      - name: Publish GitHub Release (tags or manual)
-        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.publish_release == 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('ci-{0}', github.sha) }}
-          name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('CI build {0}', github.sha) }}
-          draft: ${{ github.event.inputs.publish_release == 'true' && !startsWith(github.ref, 'refs/tags/') }}
-          files: |
-            dist/*.tar.gz
-            dist/*.manifest.json
-          generate_release_notes: true
-          fail_on_unmatched_files: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Job summary
         if: always()
         run: |
           set -euo pipefail
           {
-            echo "## micmac-gpgpu sm${CUDA_ARCH} build"
-            echo ""
+            echo "## micmac-gpgpu ${{ matrix.sm_label }}"
             echo "- commit: \`${{ github.sha }}\`"
-            echo "- artifact: \`micmac-gpgpu-sm${CUDA_ARCH}-${{ github.sha }}\`"
+            echo "- artifact: \`micmac-gpgpu-${{ matrix.sm_label }}-${{ github.sha }}\`"
             echo "- tarball: \`${{ steps.build.outputs.tar }}\`"
-            echo ""
-            echo "### Install"
-            echo '```bash'
-            echo "tar -xzf micmac-gpgpu-sm${CUDA_ARCH}-*.tar.gz"
-            echo "export PATH=\"\$PWD/micmac-gpgpu-sm${CUDA_ARCH}-*/bin:\$PATH\""
-            echo "mm3d"
-            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # Optional: one fat binary with all SMs (slower, larger, one download).
+  build-fat:
+    name: build-fat
+    needs: prepare
+    if: github.event.inputs.fat_binary == 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    container:
+      image: nvidia/cuda:11.8.0-devel-ubuntu22.04
+    defaults:
+      run:
+        shell: bash
+    env:
+      CUDA_HOME: /usr/local/cuda
+      DEBIAN_FRONTEND: noninteractive
+      JOBS: "4"
+      CUDA_ARCHS: ${{ needs.prepare.outputs.archs }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Install deps + build fat
+        run: |
+          set -euo pipefail
+          apt-get update -qq
+          apt-get install -y -qq bash cmake ninja-build g++ make git rsync \
+            libtiff-dev libpng-dev libjpeg-dev zlib1g-dev libexpat1-dev python3 curl
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          chmod +x ci/*.sh
+          # primary = first arch
+          export CUDA_ARCH=$(echo "$CUDA_ARCHS" | awk '{print $1}')
+          export CUDA_ARCHS
+          bash ci/build_cuda_sm86.sh
+          ls -lah dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: micmac-gpgpu-fat-${{ github.sha }}
+          path: |
+            dist/*.tar.gz
+            dist/*.manifest.json
+          retention-days: 30
+
+  release:
+    name: github-release
+    needs: [prepare, build]
+    if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.publish_release == 'true'
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Download all SM artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: micmac-gpgpu-sm*-${{ github.sha }}
+          merge-multiple: true
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('ci-{0}', github.sha) }}
+          name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('CI build {0}', github.sha) }}
+          draft: ${{ github.event.inputs.publish_release == 'true' && !startsWith(github.ref, 'refs/tags/') }}
+          files: artifacts/**
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   ghcr:
-    name: push-ghcr
-    needs: build
+    name: push-ghcr-${{ matrix.sm_label }}
+    needs: [prepare, build]
     if: >
       github.event_name != 'pull_request' &&
       (github.event_name != 'workflow_dispatch' || github.event.inputs.push_ghcr != 'false')
     runs-on: ubuntu-22.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     defaults:
       run:
         shell: bash
     env:
-      CUDA_ARCH: ${{ github.event.inputs.cuda_arch || '86' }}
-
+      CUDA_ARCH: ${{ matrix.arch }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 1
-
-      - name: Download build artifact
+      - name: Download ${{ matrix.sm_label }} artifact
         uses: actions/download-artifact@v4
         with:
-          name: micmac-gpgpu-sm${{ env.CUDA_ARCH }}-${{ github.sha }}
+          name: micmac-gpgpu-${{ matrix.sm_label }}-${{ github.sha }}
           path: artifact
-
-      - name: Unpack package
+      - name: Unpack
         id: unpack
         run: |
           set -euo pipefail
@@ -201,52 +251,30 @@ jobs:
           CTX=$(find unpacked -maxdepth 1 -type d -name 'micmac-gpgpu-sm*' | head -1)
           test -x "$CTX/bin/mm3d"
           echo "context=$CTX" >> "$GITHUB_OUTPUT"
-          ls -la "$CTX/bin"
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
+      - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push image
+      - name: Build and push
         env:
           CTX: ${{ steps.unpack.outputs.context }}
         run: |
           set -euo pipefail
           OWNER=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
-          IMG="ghcr.io/${OWNER}/micmac-gpgpu-sm${CUDA_ARCH}"
+          # Image per SM: ghcr.io/owner/micmac-gpgpu-sm86
+          IMG="ghcr.io/${OWNER}/micmac-gpgpu-${{ matrix.sm_label }}"
           SHORT=$(echo '${{ github.sha }}' | cut -c1-12)
           BRANCH_TAG=$(echo '${{ github.ref_name }}' | tr '/' '-' | tr '[:upper:]' '[:lower:]')
-
           cp ci/Dockerfile.release-sm86 "$CTX/Dockerfile"
           docker build -t "${IMG}:${SHORT}" \
             -t "${IMG}:${{ github.sha }}" \
-            -t "${IMG}:sha-${SHORT}" \
             -t "${IMG}:${BRANCH_TAG}" \
             "$CTX"
-
           docker push "${IMG}:${SHORT}"
           docker push "${IMG}:${{ github.sha }}"
-          docker push "${IMG}:sha-${SHORT}"
           docker push "${IMG}:${BRANCH_TAG}"
-
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            docker tag "${IMG}:${SHORT}" "${IMG}:${{ github.ref_name }}"
-            docker push "${IMG}:${{ github.ref_name }}"
-          fi
-
           {
-            echo "### GHCR"
-            echo "\`\`\`"
-            echo "${IMG}:${SHORT}"
-            echo "${IMG}:${BRANCH_TAG}"
-            echo "\`\`\`"
-            echo ""
-            echo "Worker Dockerfile snippet:"
-            echo "\`\`\`dockerfile"
-            echo "COPY --from=${IMG}:${SHORT} /opt/micmac-gpgpu-sm86 /opt/micmac-gpgpu-sm86"
-            echo "ENV PATH=\"/opt/micmac-gpgpu-sm86/bin:\${PATH}\""
-            echo "\`\`\`"
+            echo "### GHCR ${{ matrix.sm_label }}"
+            echo "\`${IMG}:${SHORT}\`"
           } >> "$GITHUB_STEP_SUMMARY"
