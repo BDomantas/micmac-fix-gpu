@@ -4,12 +4,11 @@
 /// In-process GPU MEC pipeline control (gpu-instream plan).
 ///
 /// Env:
-///   MICMAC_GPU_PIPELINE=0|1     0 = legacy process-per-box GPU (default)
-///                               1 = in-process box loop for GPU_STAGE
-///   MICMAC_GPU_LEGACY_PROCESS=1 force make -j GPU boxes even if pipeline=1
+///   MICMAC_GPU_PIPELINE=0|1     1 = in-process multi-stream GPU (default after P-G)
+///                               0 = legacy process-per-box GPU
+///   MICMAC_GPU_LEGACY_PROCESS=1 force make -j GPU boxes even if pipeline on
 ///
-/// Phase A: pipeline mode only forces in-process boxes (NSTREAM still 1,
-/// full device syncs). Later phases add multi-stream / texture objects.
+/// Phase G (post soak): default pipeline-on. Escape with PIPELINE=0 or LEGACY_PROCESS=1.
 
 #include <cstdlib>
 #include <cstdio>
@@ -39,14 +38,17 @@ inline bool EnvTruthy(const char * e)
     return true; // "1", "on", "true", "yes", anything else non-false
 }
 
-/// Default off until Phase A is green and soak (plan Phase G flips default).
+/// Default **on** after P-G soak (2026-07-30). Explicit 0/off restores legacy process path.
 inline bool PipelineEnabled()
 {
     static int s = -1;
     if (s >= 0)
         return s != 0;
     const char * e = std::getenv("MICMAC_GPU_PIPELINE");
-    s = EnvTruthy(e) ? 1 : 0;
+    if (!e || !e[0])
+        s = 1; // Phase G production default
+    else
+        s = EnvTruthy(e) ? 1 : 0;
     return s != 0;
 }
 
