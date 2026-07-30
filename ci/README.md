@@ -13,15 +13,26 @@ Does **not** depend on `maps` or `maps-next` repos. Consumers (including maps-ne
 | `*.manifest.json` | sha256, git SHA, arch list, install hint |
 | GHCR | `ghcr.io/<owner>/micmac-gpgpu-sm86:<sha>` (and sm80/sm89) |
 
-### Architectures (easy)
+### Architectures (fat default)
+
+See [GPU_SM_MAP.md](./GPU_SM_MAP.md) for SKU → SM mapping.
 
 | Env | Meaning |
 |-----|---------|
-| `CUDA_ARCH=86` | Primary SM for cmake (default **86**) |
-| `CUDA_ARCHS=86` | Single-SM binary (default = `CUDA_ARCH`) |
-| `CUDA_ARCHS="80 86 89"` | **Fat** binary (one mm3d, multiple `--generate-code`) |
+| `CUDA_ARCH=80` | Primary SM for cmake (first of list) |
+| `CUDA_ARCHS="80 86 89 120"` | **Fat** default — A100 + Ampere pro + Ada + Blackwell 50-series |
 
-CI matrix (default) builds **separate jobs** for `80`, `86`, `89` so you can pull exactly `sm_86` for A4500 without downloading Ada/Turing flavors.
+| Hardware you listed | SM in fat |
+|---------------------|-----------|
+| A100 PCIe | 80 |
+| L40S, RTX 5000 Ada, RTX 5880 Ada, RTX PRO 5000 Ada | 89 |
+| RTX 5090 / Blackwell PRO 5000 | 120 |
+| (kept) A4500-class | 86 |
+
+**2× GPU cards:** still one SM family; use two processes / `CUDA_VISIBLE_DEVICES` — fat does not mean multi-GPU in one process.
+
+CI uses **CUDA 12.8** devel image (needed for **sm_120**).  
+Publishes: Actions artifact, Release tag **`cuda-fat-latest`**, GHCR **`micmac-gpgpu-fat:cuda-fat-latest`**.
 
 Build is **compile-only** on GitHub Actions (no GPU on the runner). Runtime still needs a host with NVIDIA driver + matching CUDA userland.
 

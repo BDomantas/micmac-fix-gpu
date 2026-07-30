@@ -41,14 +41,20 @@ DIST_DIR="${DIST_DIR:-$ROOT/dist}"
 CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
 APPLY_OVERRIDES="${APPLY_OVERRIDES:-1}"
 
-# Build nvcc multi-gencode flags
+# Build nvcc multi-gencode flags (SASS per SM). Newest SM also gets PTX for forward JIT.
 NVCC_GENCODES=""
+_LAST_A=""
 for a in $CUDA_ARCHS_NORM; do
   case "$a" in
     ''|*[!0-9]*) echo "ERROR: invalid CUDA arch '$a' (digits only, e.g. 86)" >&2; exit 2 ;;
   esac
   NVCC_GENCODES+=" --generate-code=arch=compute_${a},code=sm_${a}"
+  _LAST_A="$a"
 done
+# PTX for newest arch (helps slightly newer GPUs if driver can JIT)
+if [[ -n "$_LAST_A" ]]; then
+  NVCC_GENCODES+=" --generate-code=arch=compute_${_LAST_A},code=compute_${_LAST_A}"
+fi
 NVCC_GENCODES="$(echo "$NVCC_GENCODES" | xargs)"
 
 echo "=== micmac-gpgpu CI build $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="

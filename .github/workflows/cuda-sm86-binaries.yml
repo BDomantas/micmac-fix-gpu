@@ -1,12 +1,14 @@
-# Build CUDA-enabled mm3d and publish pullable artifacts.
-# Standalone: BDomantas/micmac-fix-gpu only (not maps-next).
+# Fat CUDA mm3d for common aerial / workstation GPUs + publish artifacts.
 #
-# Produces one artifact per SM (matrix): sm_75 / sm_80 / sm_86 / sm_89
-# Or override via workflow_dispatch inputs.
+# Default fat SMs (CUDA 12.8+):
+#   80  = A100
+#   86  = Ampere pro (A4500, etc.)
+#   89  = Ada (L40S, RTX 5000/5880 Ada, RTX PRO 5000 Ada)
+#   120 = Blackwell (RTX 5090, RTX PRO 5000 Blackwell)
 #
-# Compile-only on GHA (no GPU). Runtime needs NVIDIA driver on target host.
+# Compile-only on GHA (no GPU). Target host needs NVIDIA driver + CUDA userland.
 
-name: CUDA sm86 binaries
+name: CUDA fat binaries
 
 on:
   push:
@@ -19,25 +21,21 @@ on:
       - "v*"
   workflow_dispatch:
     inputs:
-      publish_release:
-        description: "Also create/update a GitHub Release with the tarballs"
-        type: boolean
-        default: false
       cuda_archs:
-        description: "Comma-separated SMs to build as separate jobs (e.g. 86 or 80,86,89)"
+        description: "SMs for fat binary (space or comma separated)"
         type: string
-        default: "80,86,89"
-      fat_binary:
-        description: "Also build one fat binary embedding all listed SMs"
+        default: "80,86,89,120"
+      publish_release:
+        description: "Update GitHub Release tag cuda-fat-latest"
         type: boolean
-        default: false
+        default: true
       push_ghcr:
-        description: "Push thin runtime images to GHCR (one per SM)"
+        description: "Push GHCR image micmac-gpgpu-fat"
         type: boolean
         default: true
 
 concurrency:
-  group: cuda-sm-${{ github.ref }}
+  group: cuda-fat-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -46,48 +44,28 @@ permissions:
   actions: read
 
 jobs:
-  # Expand arch list into a JSON matrix (default 80,86,89).
-  prepare:
-    name: prepare-matrix
-    runs-on: ubuntu-22.04
-    outputs:
-      matrix: ${{ steps.set.outputs.matrix }}
-      archs: ${{ steps.set.outputs.archs }}
-    steps:
-      - name: Build matrix JSON
-        id: set
-        shell: bash
-        env:
-          ARCHS_IN: ${{ github.event.inputs.cuda_archs || '80,86,89' }}
-        run: |
-          set -euo pipefail
-          ARCHS=$(echo "$ARCHS_IN" | tr ',;/' ' ' | xargs)
-          export ARCHS
-          echo "Building SMs: $ARCHS"
-          echo "archs=$ARCHS" >> "$GITHUB_OUTPUT"
-          python3 -c 'import json,os; archs=os.environ["ARCHS"].split(); m={"include":[{"arch":a,"sm_label":f"sm{a}"} for a in archs]}; line="matrix="+json.dumps(m,separators=(",",":")); open(os.environ["GITHUB_OUTPUT"],"a").write(line+"\n"); print(line)'
-
-  build:
-    name: build-${{ matrix.sm_label }}
-    needs: prepare
+  build-fat:
+    name: build-fat
     runs-on: ubuntu-22.04
     timeout-minutes: 360
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
-    # CUDA container: compile-only (no GPU on runner).
+    # CUDA 12.8 required for sm_120 (RTX 5090 / Blackwell)
     container:
-      image: nvidia/cuda:11.8.0-devel-ubuntu22.04
+      image: nvidia/cuda:12.8.0-devel-ubuntu22.04
     defaults:
       run:
         shell: bash
 
     env:
-      CUDA_ARCH: ${{ matrix.arch }}
-      CUDA_ARCHS: ${{ matrix.arch }}
       CUDA_HOME: /usr/local/cuda
       DEBIAN_FRONTEND: noninteractive
       JOBS: "4"
+      # Primary arch for cmake MICMAC_CUDA_ARCH (first of list)
+      CUDA_ARCH: "80"
+      CUDA_ARCHS: ${{ github.event.inputs.cuda_archs || '80,86,89,120' }}
+
+    outputs:
+      tar_name: ${{ steps.build.outputs.tar }}
+      sm_label: ${{ steps.build.outputs.sm_label }}
 
     steps:
       - name: Disk report
@@ -95,6 +73,7 @@ jobs:
           set -euo pipefail
           command -v bash
           df -h
+          nvcc --version || true
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -112,169 +91,154 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           nvcc --version
           cmake --version
-          echo "Building SM=${CUDA_ARCH} (${{ matrix.sm_label }})"
 
-      - name: Build + package
+      - name: Build fat + package
         id: build
         run: |
           set -euo pipefail
           chmod +x ci/*.sh
+          # normalize ARCHS for script
+          export CUDA_ARCHS
+          CUDA_ARCHS=$(echo "$CUDA_ARCHS" | tr ',;/' ' ' | xargs)
+          export CUDA_ARCH
+          CUDA_ARCH=$(echo "$CUDA_ARCHS" | awk '{print $1}')
+          echo "CUDA_ARCH=$CUDA_ARCH CUDA_ARCHS=$CUDA_ARCHS"
           bash ci/build_cuda_sm86.sh
           ls -lah dist/
           cat dist/*.manifest.json
-          TAR=$(ls dist/micmac-gpgpu-sm${CUDA_ARCH}-*.tar.gz | head -1)
+          TAR=$(ls dist/micmac-gpgpu-sm*.tar.gz | head -1)
           test -f "$TAR"
+          # derive sm_label from tarball name micmac-gpgpu-sm80_86_89_120-SHORT.tar.gz
+          BASE=$(basename "$TAR" .tar.gz)
+          # strip micmac-gpgpu- prefix and -SHORT suffix
+          SM_LABEL=$(echo "$BASE" | sed -E 's/^micmac-gpgpu-//; s/-[0-9a-f]+$//')
           echo "tar=$(basename "$TAR")" >> "$GITHUB_OUTPUT"
+          echo "sm_label=$SM_LABEL" >> "$GITHUB_OUTPUT"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: micmac-gpgpu-${{ matrix.sm_label }}-${{ github.sha }}
+          name: micmac-gpgpu-fat-${{ github.sha }}
           path: |
             dist/*.tar.gz
             dist/*.manifest.json
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90
+
+      - name: Publish / update Release cuda-fat-latest
+        if: >
+          github.event_name == 'push' ||
+          github.event.inputs.publish_release == 'true' ||
+          startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: cuda-fat-latest
+          name: CUDA fat mm3d (sm80+86+89+120)
+          body: |
+            Rolling fat binary for:
+            - **sm_80** A100
+            - **sm_86** Ampere pro (A4500, …)
+            - **sm_89** Ada (L40S, RTX 5000/5880 Ada, RTX PRO 5000 Ada)
+            - **sm_120** Blackwell (RTX 5090, RTX PRO 5000 Blackwell)
+
+            Commit: `${{ github.sha }}`
+            Branch: `${{ github.ref_name }}`
+
+            ```bash
+            tar -xzf micmac-gpgpu-sm80_86_89_120-*.tar.gz
+            export PATH="$PWD/micmac-gpgpu-sm80_86_89_120-*/bin:$PATH"
+            mm3d
+            ```
+
+            Multi-GPU (2× cards): use one process per GPU (`CUDA_VISIBLE_DEVICES=0` / `1`).
+          files: |
+            dist/*.tar.gz
+            dist/*.manifest.json
+          make_latest: true
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Job summary
         if: always()
         run: |
           set -euo pipefail
           {
-            echo "## micmac-gpgpu ${{ matrix.sm_label }}"
+            echo "## Fat CUDA binary"
             echo "- commit: \`${{ github.sha }}\`"
-            echo "- artifact: \`micmac-gpgpu-${{ matrix.sm_label }}-${{ github.sha }}\`"
             echo "- tarball: \`${{ steps.build.outputs.tar }}\`"
+            echo "- SMs: \`80 86 89 120\` (default)"
+            echo "- Release tag: \`cuda-fat-latest\` (if publish ran)"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # Optional: one fat binary with all SMs (slower, larger, one download).
-  build-fat:
-    name: build-fat
-    needs: prepare
-    if: github.event.inputs.fat_binary == 'true'
-    runs-on: ubuntu-22.04
-    timeout-minutes: 360
-    container:
-      image: nvidia/cuda:11.8.0-devel-ubuntu22.04
-    defaults:
-      run:
-        shell: bash
-    env:
-      CUDA_HOME: /usr/local/cuda
-      DEBIAN_FRONTEND: noninteractive
-      JOBS: "4"
-      CUDA_ARCHS: ${{ needs.prepare.outputs.archs }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-      - name: Install deps + build fat
-        run: |
-          set -euo pipefail
-          apt-get update -qq
-          apt-get install -y -qq bash cmake ninja-build g++ make git rsync \
-            libtiff-dev libpng-dev libjpeg-dev zlib1g-dev libexpat1-dev python3 curl
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          chmod +x ci/*.sh
-          # primary = first arch
-          export CUDA_ARCH=$(echo "$CUDA_ARCHS" | awk '{print $1}')
-          export CUDA_ARCHS
-          bash ci/build_cuda_sm86.sh
-          ls -lah dist/
-      - uses: actions/upload-artifact@v4
-        with:
-          name: micmac-gpgpu-fat-${{ github.sha }}
-          path: |
-            dist/*.tar.gz
-            dist/*.manifest.json
-          retention-days: 30
-
-  release:
-    name: github-release
-    needs: [prepare, build]
-    if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.publish_release == 'true'
-    runs-on: ubuntu-22.04
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Download all SM artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          pattern: micmac-gpgpu-sm*-${{ github.sha }}
-          merge-multiple: true
-      - name: Publish release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('ci-{0}', github.sha) }}
-          name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('CI build {0}', github.sha) }}
-          draft: ${{ github.event.inputs.publish_release == 'true' && !startsWith(github.ref, 'refs/tags/') }}
-          files: artifacts/**
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   ghcr:
-    name: push-ghcr-${{ matrix.sm_label }}
-    needs: [prepare, build]
+    name: push-ghcr-fat
+    needs: build-fat
     if: >
       github.event_name != 'pull_request' &&
       (github.event_name != 'workflow_dispatch' || github.event.inputs.push_ghcr != 'false')
     runs-on: ubuntu-22.04
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     defaults:
       run:
         shell: bash
-    env:
-      CUDA_ARCH: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
-      - name: Download ${{ matrix.sm_label }} artifact
+      - name: Download fat artifact
         uses: actions/download-artifact@v4
         with:
-          name: micmac-gpgpu-${{ matrix.sm_label }}-${{ github.sha }}
+          name: micmac-gpgpu-fat-${{ github.sha }}
           path: artifact
       - name: Unpack
         id: unpack
         run: |
           set -euo pipefail
-          TAR=$(ls artifact/micmac-gpgpu-sm${CUDA_ARCH}-*.tar.gz | head -1)
+          TAR=$(ls artifact/micmac-gpgpu-sm*.tar.gz | head -1)
           test -f "$TAR"
           mkdir -p unpacked
           tar -C unpacked -xzf "$TAR"
           CTX=$(find unpacked -maxdepth 1 -type d -name 'micmac-gpgpu-sm*' | head -1)
           test -x "$CTX/bin/mm3d"
           echo "context=$CTX" >> "$GITHUB_OUTPUT"
+          ls -lah "$CTX/bin"
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push
+      - name: Build and push fat image
         env:
           CTX: ${{ steps.unpack.outputs.context }}
         run: |
           set -euo pipefail
           OWNER=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
-          # Image per SM: ghcr.io/owner/micmac-gpgpu-sm86
-          IMG="ghcr.io/${OWNER}/micmac-gpgpu-${{ matrix.sm_label }}"
+          IMG="ghcr.io/${OWNER}/micmac-gpgpu-fat"
           SHORT=$(echo '${{ github.sha }}' | cut -c1-12)
           BRANCH_TAG=$(echo '${{ github.ref_name }}' | tr '/' '-' | tr '[:upper:]' '[:lower:]')
           cp ci/Dockerfile.release-sm86 "$CTX/Dockerfile"
-          docker build -t "${IMG}:${SHORT}" \
+          docker build \
+            -t "${IMG}:${SHORT}" \
             -t "${IMG}:${{ github.sha }}" \
             -t "${IMG}:${BRANCH_TAG}" \
+            -t "${IMG}:cuda-fat-latest" \
+            -t "${IMG}:latest" \
             "$CTX"
           docker push "${IMG}:${SHORT}"
           docker push "${IMG}:${{ github.sha }}"
           docker push "${IMG}:${BRANCH_TAG}"
+          docker push "${IMG}:cuda-fat-latest"
+          docker push "${IMG}:latest"
           {
-            echo "### GHCR ${{ matrix.sm_label }}"
+            echo "### GHCR fat"
+            echo "\`${IMG}:cuda-fat-latest\`"
             echo "\`${IMG}:${SHORT}\`"
+            echo ""
+            echo "Worker snippet:"
+            echo "\`\`\`dockerfile"
+            echo "COPY --from=${IMG}:cuda-fat-latest /opt/micmac-gpgpu-sm86 /opt/micmac-gpgpu-sm86"
+            echo "ENV PATH=\"/opt/micmac-gpgpu-sm86/bin:\${PATH}\""
+            echo "\`\`\`"
+            echo "(Path inside image is install tree root as packaged; adjust if label differs.)"
           } >> "$GITHUB_STEP_SUMMARY"
