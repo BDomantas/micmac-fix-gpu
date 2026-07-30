@@ -2060,14 +2060,8 @@ unsigned long _gpgpu_idle = 0;
                 if (!_did)
                 {
                     _gpgpu_idle++;
-                    // PR-E: host idle wait — short sleep only as fallback; primary wake is flag/CV from worker.
-#if (!ELISE_windows)
-                    {
-                        // Prefer env poll; default 200µs is no longer primary path on worker.
-                        // Host uses 200µs CV-friendly pause (not 2ms busy sleep).
-                        struct timespec _ts; _ts.tv_sec=0; _ts.tv_nsec=200000L; nanosleep(&_ts, 0);
-                    }
-#endif
+                    // PR-E: primary host idle = CV wait (HostIdleWaitForProgress); POLL_US fallback only.
+                    IMmGg.HostIdleWaitForProgress();
                     if ((_gpgpu_idle % 1000) == 0)
                     {
                         GPGPU_DIAG_FULL(

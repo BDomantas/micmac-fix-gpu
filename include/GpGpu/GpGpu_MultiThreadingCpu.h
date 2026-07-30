@@ -78,6 +78,10 @@ public:
     ///
     bool            GetPreComp();
 
+    /// PR-E: host idle primary wait — CV notify (DataToCopy / PreComp / Compute).
+    /// MICMAC_GPU_POLL_US>0 forces timed poll fallback (debug only).
+    void            HostIdleWaitForProgress();
+
 	///
 	/// \brief UseMultiThreading
 	/// \return La valeur de l'option sur l'utilisation du parall�lisme CPU
@@ -138,14 +142,18 @@ private:
     std::mutex    _mutexWork;          // PR-D: serialize simpleWork enqueue
     std::condition_variable _cvCompu;  // PR-E
     std::condition_variable _cvCopy;   // PR-E
+    std::mutex              _mutexHost; // PR-E host idle
+    std::condition_variable _cvHost;    // PR-E host idle wake
     #endif
 #else
     boost::mutex    _mutexCompu;
     boost::mutex    _mutexCopy;
     boost::mutex    _mutexPreCompute;
     boost::mutex    _mutexWork;
+    boost::mutex    _mutexHost;
     boost::condition_variable _cvCompu;
     boost::condition_variable _cvCopy;
+    boost::condition_variable _cvHost;
 #endif
 
     T               _compute;
@@ -192,6 +200,7 @@ void CSimpleJobCpuGpu<T>::SetCompute(T toBeComputed)
         _compute = toBeComputed;
     }
     _cvCompu.notify_all(); // PR-E
+    _cvHost.notify_all();
     #else
     _compute = toBeComputed;
     #endif
@@ -201,6 +210,7 @@ void CSimpleJobCpuGpu<T>::SetCompute(T toBeComputed)
         _compute = toBeComputed;
     }
     _cvCompu.notify_all();
+    _cvHost.notify_all();
 #endif
 }
 
@@ -227,6 +237,7 @@ void CSimpleJobCpuGpu<T>::SetDataToCopy(T toBeCopy)
         _copy = toBeCopy;
     }
     _cvCopy.notify_all(); // PR-E
+    _cvHost.notify_all();
     #else
     _copy = toBeCopy;
     #endif
@@ -236,6 +247,7 @@ void CSimpleJobCpuGpu<T>::SetDataToCopy(T toBeCopy)
         _copy = toBeCopy;
     }
     _cvCopy.notify_all();
+    _cvHost.notify_all();
 #endif
 }
 
@@ -257,13 +269,21 @@ void CSimpleJobCpuGpu<T>::SetPreComp(bool canBePreCompute)
 {
 #ifdef CPP11_THREAD
     #ifdef NOCUDA_X11
-    std::lock_guard<std::mutex> guard(_mutexPreCompute);
+    {
+        std::lock_guard<std::mutex> guard(_mutexPreCompute);
+        _precompute = canBePreCompute;
+    }
+    _cvHost.notify_all(); // PR-E: host may prep next cell
+    #else
+    _precompute = canBePreCompute;
     #endif
 #else
-    boost::lock_guard<boost::mutex> guard(_mutexPreCompute);
+    {
+        boost::lock_guard<boost::mutex> guard(_mutexPreCompute);
+        _precompute = canBePreCompute;
+    }
+    _cvHost.notify_all();
 #endif
-
-    _precompute = canBePreCompute;
 }
 
 template< class T >
@@ -323,6 +343,49 @@ void CSimpleJobCpuGpu<T>::IncProgress(uint inc)
 #ifndef CPP11_THREAD
     if(_show_progress_console)
         (*_show_progress) += inc;
+#endif
+}
+
+
+template< class T >
+void CSimpleJobCpuGpu<T>::HostIdleWaitForProgress()
+{
+    // PR-E: primary path = condition_variable; MICMAC_GPU_POLL_US>0 = debug poll only.
+    auto poll_us = []() -> int {
+        const char * e = std::getenv("MICMAC_GPU_POLL_US");
+        if (!e || !e[0])
+            return 0;
+        int v = std::atoi(e);
+        return v > 0 ? v : 0;
+    };
+    const int pu = poll_us();
+    if (GetDataToCopy() || GetPreComp())
+        return;
+    if (pu > 0)
+    {
+#if defined(CPP11_THREAD) && defined(NOCUDA_X11)
+        std::this_thread::sleep_for(std::chrono::microseconds(pu));
+#elif !defined(CPP11_THREAD)
+        boost::this_thread::sleep(boost::posix_time::microsec(pu));
+#endif
+        return;
+    }
+#if defined(CPP11_THREAD) && defined(NOCUDA_X11)
+    {
+        std::unique_lock<std::mutex> lk(_mutexHost);
+        _cvHost.wait_for(lk, std::chrono::milliseconds(50), [this]{
+            // Re-check flags under host lock (Get* take their own mutexes).
+            return (bool)GetDataToCopy() || GetPreComp();
+        });
+    }
+#elif !defined(CPP11_THREAD)
+    {
+        boost::unique_lock<boost::mutex> lk(_mutexHost);
+        _cvHost.timed_wait(lk, boost::posix_time::milliseconds(50));
+    }
+#else
+    // nvcc parse path without host threads
+    (void)0;
 #endif
 }
 
