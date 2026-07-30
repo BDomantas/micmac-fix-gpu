@@ -15,29 +15,7 @@ import sys
 gpu, cmake_path, tools_path = map(Path, sys.argv[1:])
 text = gpu.read_text(encoding="utf-8")
 marker = "# RUNPOD MODERN CUDA ARCH OVERRIDE"
-if marker not in text:
-    probe = text.index("# verif if FoundCapa.exe exists --")
-    arch = text.index('set(_cudaArch "${_outNVCC}")', probe)
-    old_probe = text[probe:arch]
-    text = (
-        text[:probe]
-        + f"""{marker}
-if(DEFINED MICMAC_CUDA_ARCH AND NOT "${{MICMAC_CUDA_ARCH}}" STREQUAL "")
- set(_resultNVCC 0)
- set(_outNVCC "override")
-else()
-{old_probe}endif()
-
-"""
-        + text[arch:]
-    )
-    arch = text.index('set(_cudaArch "${_outNVCC}")')
-    message = text.index('message("Cuda API Version', arch)
-    old_arch = text[arch:message]
-    text = (
-        text[:arch]
-        + f"""{marker}
-if(DEFINED MICMAC_CUDA_ARCH AND NOT "${{MICMAC_CUDA_ARCH}}" STREQUAL "")
+arch_map_block = f"""if(DEFINED MICMAC_CUDA_ARCH AND NOT "${{MICMAC_CUDA_ARCH}}" STREQUAL "")
  set(cuda_arch_version "${{MICMAC_CUDA_ARCH}}")
  if("${{MICMAC_CUDA_ARCH}}" STREQUAL "120")
   set(cuda_arch_version_string "12.0")
@@ -60,7 +38,50 @@ if(DEFINED MICMAC_CUDA_ARCH AND NOT "${{MICMAC_CUDA_ARCH}}" STREQUAL "")
  else()
   message(FATAL_ERROR "Unsupported MICMAC_CUDA_ARCH=${{MICMAC_CUDA_ARCH}}")
  endif()
+"""
+
+# Upgrade in-place if an older override (missing 120) is already present.
+if marker in text and 'STREQUAL "120"' not in text:
+    import re
+    # Replace the first MICMAC_CUDA_ARCH version-mapping if-block after the arch override marker.
+    pat = re.compile(
+        r'if\(DEFINED MICMAC_CUDA_ARCH AND NOT "\$\{MICMAC_CUDA_ARCH\}" STREQUAL ""\)\s*'
+        r'set\(cuda_arch_version "\$\{MICMAC_CUDA_ARCH\}"\).*?'
+        r'endif\(\)\s*\nelse\(\)\s*\nset\(_cudaArch',
+        re.S,
+    )
+    new_text, n = pat.subn(arch_map_block + "else()\nset(_cudaArch", text, count=1)
+    if n:
+        text = new_text
+        gpu.write_text(text, encoding="utf-8")
+        print("upgraded GpGpu.cmake arch override (added sm_120/100/90)")
+    else:
+        print("WARN: could not upgrade arch map; will try full patch path")
+
+text = gpu.read_text(encoding="utf-8")
+if marker not in text:
+    probe = text.index("# verif if FoundCapa.exe exists --")
+    arch = text.index('set(_cudaArch "${_outNVCC}")', probe)
+    old_probe = text[probe:arch]
+    text = (
+        text[:probe]
+        + f"""{marker}
+if(DEFINED MICMAC_CUDA_ARCH AND NOT "${{MICMAC_CUDA_ARCH}}" STREQUAL "")
+ set(_resultNVCC 0)
+ set(_outNVCC "override")
 else()
+{old_probe}endif()
+
+"""
+        + text[arch:]
+    )
+    arch = text.index('set(_cudaArch "${_outNVCC}")')
+    message = text.index('message("Cuda API Version', arch)
+    old_arch = text[arch:message]
+    text = (
+        text[:arch]
+        + f"""{marker}
+{arch_map_block}else()
 {old_arch}endif()
 
 """
@@ -68,8 +89,10 @@ else()
     )
     gpu.write_text(text, encoding="utf-8")
     print("patched GpGpu.cmake arch override")
+elif 'STREQUAL "120"' in text:
+    print("GpGpu.cmake arch override already present (includes sm_120)")
 else:
-    print("GpGpu.cmake arch override already present")
+    print("WARN: GpGpu.cmake has override marker but sm_120 still missing")
 
 compat = "RUNPOD CUDA 12 TEXTURE OBJECT COMPAT"
 cmake = cmake_path.read_text(encoding="utf-8")
