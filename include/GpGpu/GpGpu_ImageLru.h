@@ -23,7 +23,10 @@ namespace gpgpu_img_lru {
 
 struct ClipRect
 {
-    int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+    int x0, y0, x1, y1;
+
+    ClipRect() : x0(0), y0(0), x1(0), y1(0) {}
+    ClipRect(int a, int b, int c, int d) : x0(a), y0(b), x1(c), y1(d) {}
 
     bool valid() const { return x1 > x0 && y1 > y0; }
 
@@ -51,7 +54,10 @@ struct ClipRect
 struct Key
 {
     std::string image;
-    int dezoom = 0;
+    int dezoom;
+
+    Key() : dezoom(0) {}
+    Key(const std::string & img, int dz) : image(img), dezoom(dz) {}
 
     bool operator==(const Key & o) const
     {
