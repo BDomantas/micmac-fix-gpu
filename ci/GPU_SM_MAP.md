@@ -1,27 +1,39 @@
-# GPU SKU → CUDA SM map (for fat binary)
+# GPU SKU → CUDA SM map
 
-Fat default embeds: **sm_80 + sm_86 + sm_89 + sm_120**  
-(CUDA toolkit ≥ **12.8** required for sm_120 / RTX 50-series.)
+## Fat + per-SM packages (CUDA **11.8**)
 
-| Your hardware | Architecture | CUDA SM | Covered by fat? |
-|---------------|--------------|---------|-----------------|
-| **A100 PCIe** | Ampere | **sm_80** | yes |
-| A4500 / GA10x class | Ampere | **sm_86** | yes (kept for existing pods) |
-| **L40S** | Ada | **sm_89** | yes |
-| **RTX 5000 Ada** | Ada | **sm_89** | yes |
-| **RTX 5880 Ada** | Ada | **sm_89** | yes |
-| **RTX PRO 5000** (Ada generation) | Ada | **sm_89** | yes |
-| **RTX PRO 5000** (Blackwell workstation, if that SKU) | Blackwell | **sm_120** | yes |
-| **RTX 5090** | Blackwell | **sm_120** | yes |
+Default CI builds **each** SM separately **and** a **fat** binary with all of:
+
+| SM | Hardware |
+|----|----------|
+| **80** | **A100 PCIe** |
+| **86** | A4500 / Ampere pro (existing pods) |
+| **89** | **L40S**, **RTX 5000 Ada**, **RTX 5880 Ada**, **RTX PRO 5000 Ada** |
+
+Artifact names: `micmac-gpgpu-sm80-…`, `…-sm86-…`, `…-sm89-…`, fat `micmac-gpgpu-sm80_86_89-…`.
+
+Release tag: **`cuda-latest`**  
+GHCR: `micmac-gpgpu-sm86:latest`, `micmac-gpgpu-fat:cuda-latest`, etc.
 
 ## Multi-GPU (2× cards)
 
-**Not a compile flag.** One `mm3d` process typically uses **one** GPU (`CUDA_VISIBLE_DEVICES`).  
-Two physical GPUs ⇒ run two processes or sequential jobs unless the app does multi-GPU (MicMac GPU path does not magically use 2× in one process via fat).
+Not a compile flag. One `mm3d` ≈ one GPU. For 2× RTX 5000 Ada / 5880 / 5090 use two processes / `CUDA_VISIBLE_DEVICES=0|1`.
 
-Fat only means: *same binary can execute on any listed SM*, not *one process drives N cards*.
+## Not in fat yet: RTX 5090 / Blackwell (sm_120)
 
-## Artifact naming
+| Issue | Detail |
+|-------|--------|
+| Toolkit | sm_120 needs **CUDA ≥ 12.8** |
+| MicMac code | Still uses **CUDA texture references** (`texture<>`, `cudaBindTextureToArray`) **removed in CUDA 12** |
+| Hot path | Already has texture **objects** for correl, but host headers still compile the legacy path |
 
-- Fat: `micmac-gpgpu-sm80_86_89_120-<gitshort>.tar.gz`
-- GHCR: `ghcr.io/<owner>/micmac-gpgpu-fat:<sha|branch|cuda-fat-latest>`
+Until texture-ref is stubbed/ported for CUDA 12, **5090 cannot be in the fat binary**.  
+Workaround: run 5090 jobs on a machine with a driver that… no — 5090 cannot execute sm_89 SASS. Need a real sm_120 build later.
+
+## Why fat failed on CUDA 12.8
+
+```
+textureReference / cudaBindTextureToArray not declared
+```
+
+= CUDA 12 removed legacy texture API. Not a random ninja glitch.

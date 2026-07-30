@@ -13,28 +13,26 @@ Does **not** depend on `maps` or `maps-next` repos. Consumers (including maps-ne
 | `*.manifest.json` | sha256, git SHA, arch list, install hint |
 | GHCR | `ghcr.io/<owner>/micmac-gpgpu-sm86:<sha>` (and sm80/sm89) |
 
-### Architectures (fat default)
+### Architectures (per-SM **and** fat)
 
-See [GPU_SM_MAP.md](./GPU_SM_MAP.md) for SKU → SM mapping.
+See [GPU_SM_MAP.md](./GPU_SM_MAP.md).
 
-| Env | Meaning |
-|-----|---------|
-| `CUDA_ARCH=80` | Primary SM for cmake (first of list) |
-| `CUDA_ARCHS="80 86 89 120"` | **Fat** default — A100 + Ampere pro + Ada + Blackwell 50-series |
+CI default (**CUDA 11.8** — required by MicMac legacy texture API):
 
-| Hardware you listed | SM in fat |
-|---------------------|-----------|
-| A100 PCIe | 80 |
-| L40S, RTX 5000 Ada, RTX 5880 Ada, RTX PRO 5000 Ada | 89 |
-| RTX 5090 / Blackwell PRO 5000 | 120 |
-| (kept) A4500-class | 86 |
+| Package | SMs | Use for |
+|---------|-----|---------|
+| `micmac-gpgpu-sm80-…` | 80 | A100 |
+| `micmac-gpgpu-sm86-…` | 86 | A4500 / Ampere pro |
+| `micmac-gpgpu-sm89-…` | 89 | L40S, RTX 5000/5880 Ada, PRO 5000 Ada |
+| `micmac-gpgpu-sm80_86_89-…` (**fat**) | 80+86+89 | one download for all of the above |
 
-**2× GPU cards:** still one SM family; use two processes / `CUDA_VISIBLE_DEVICES` — fat does not mean multi-GPU in one process.
+**Always publishes** (on push): Actions artifacts + Release **`cuda-latest`** + GHCR per-SM and `micmac-gpgpu-fat`.
 
-CI uses **CUDA 12.8** devel image (needed for **sm_120**).  
-Publishes: Actions artifact, Release tag **`cuda-fat-latest`**, GHCR **`micmac-gpgpu-fat:cuda-fat-latest`**.
+**RTX 5090 / sm_120:** not yet — CUDA 12 removes `textureReference`; needs a code port (see GPU_SM_MAP.md).
 
-Build is **compile-only** on GitHub Actions (no GPU on the runner). Runtime still needs a host with NVIDIA driver + matching CUDA userland.
+**2× cards:** `CUDA_VISIBLE_DEVICES`, not fat.
+
+Build is **compile-only** on GitHub Actions. Runtime needs NVIDIA driver + CUDA userland on the host.
 
 ## Workflow
 
